@@ -87,8 +87,13 @@ function buildRanking(players, config) {
       pts += r.pts;
       if (r.kind === "exact") exact++; else if (r.kind === "outcome") good++;
     }
-    return { id: p.id, name: p.name, avatar: p.avatar, pts, exact, good, played, filled };
-  }).sort((x, y) => y.pts - x.pts || y.exact - x.exact || y.good - x.good || String(x.name).localeCompare(String(y.name)));
+    return { id: p.id, name: p.name, avatar: p.avatar, pts, exact, good, played, filled, firstAt: p.firstAt || 0 };
+  }).sort((x, y) =>
+    y.pts - x.pts ||
+    x.firstAt - y.firstAt ||          // égalité de points -> le premier à avoir validé gagne
+    y.exact - x.exact || y.good - x.good ||
+    String(x.name).localeCompare(String(y.name))
+  );
 }
 
 /* Renvoie la config SANS le code secret admin brut (on garde juste ce qu'il faut au client). */
@@ -252,6 +257,7 @@ module.exports = async (req, res) => {
         });
         const incoming = body.predictions || {};
         const existing = doc.predictions || {};
+        const hadLockedBefore = Object.values(existing).some((x) => x && x.locked);
         const finalPreds = {};
         // 1) on conserve tous les pronos déjà verrouillés (définitifs, jamais modifiables)
         for (const id in existing) { if (existing[id] && existing[id].locked) finalPreds[id] = existing[id]; }
@@ -262,6 +268,9 @@ module.exports = async (req, res) => {
           finalPreds[id] = incoming[id];
         }
         doc.predictions = finalPreds;
+        // Règle d'égalité : on note l'heure de la TOUTE PREMIÈRE validation du joueur.
+        const willHaveLocked = Object.values(finalPreds).some((x) => x && x.locked);
+        if (!doc.firstAt && !hadLockedBefore && willHaveLocked) doc.firstAt = Date.now();
         await redis(["SET", K_PLAYER(p.id), JSON.stringify(doc)]);
         res.status(200).json({ ok: true });
         return;
