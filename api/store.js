@@ -28,6 +28,7 @@ const K_PLAYER = (id) => "dimaprono:player:" + id;
 const K_CONFIG = "dimaprono:config";
 const K_LIVETS = "dimaprono:live:ts";
 const K_CHEERS = "dimaprono:cheers";
+const K_CHAT = "dimaprono:chat";
 
 // Clé (gratuite) football-data.org pour les scores en direct — optionnelle.
 const FD_TOKEN = process.env.FOOTBALL_DATA_TOKEN || "";
@@ -200,8 +201,9 @@ module.exports = async (req, res) => {
   try {
     if (req.method === "GET") {
       try { await maybeRefreshLive(); } catch (e) { /* jamais bloquant */ }
-      const [players, config, cheersRaw] = [await allPlayers(), await getConfig(), await redis(["GET", K_CHEERS])];
-      res.status(200).json({ online: true, config: publicConfig(config), ranking: buildRanking(players, config), cheers: +(cheersRaw || 0) });
+      const [players, config, cheersRaw, chatRaw] = [await allPlayers(), await getConfig(), await redis(["GET", K_CHEERS]), await redis(["LRANGE", K_CHAT, 0, 49])];
+      const comments = (chatRaw || []).map(parse).filter(Boolean).reverse();  // du plus ancien au plus récent
+      res.status(200).json({ online: true, config: publicConfig(config), ranking: buildRanking(players, config), cheers: +(cheersRaw || 0), comments });
       return;
     }
     if (req.method === "POST") {
@@ -305,9 +307,21 @@ module.exports = async (req, res) => {
         res.status(200).json({ ok: true, cheers: +c });
         return;
       }
+      // Poster un commentaire (nécessite le code secret du joueur).
+      if (action === "comment" && body.id) {
+        const doc = await getPlayer(body.id);
+        if (!doc) { res.status(200).json({ ok: false, error: "notfound" }); return; }
+        if (String(doc.pin || "") !== String(body.pin || "")) { res.status(200).json({ ok: false, error: "badpin" }); return; }
+        const text = String(body.text || "").replace(/\s+/g, " ").trim().slice(0, 280);
+        if (!text) { res.status(200).json({ ok: false, error: "empty" }); return; }
+        const entry = { id: doc.id, name: doc.name, avatar: doc.avatar, text, ts: Date.now() };
+        await pipeline([["LPUSH", K_CHAT, JSON.stringify(entry)], ["LTRIM", K_CHAT, 0, 199]]);
+        res.status(200).json({ ok: true });
+        return;
+      }
       if (action === "reset") {
         const ids = (await redis(["SMEMBERS", K_PIDS])) || [];
-        const cmds = [["DEL", K_CONFIG], ["DEL", K_PIDS], ["DEL", K_CHEERS]];
+        const cmds = [["DEL", K_CONFIG], ["DEL", K_PIDS], ["DEL", K_CHEERS], ["DEL", K_CHAT]];
         ids.forEach((id) => cmds.push(["DEL", K_PLAYER(id)]));
         await pipeline(cmds);
         res.status(200).json({ ok: true });
