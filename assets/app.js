@@ -924,11 +924,11 @@ $("#whoChip").addEventListener("click", openPlayerModal);
 $("#playerModal").addEventListener("click", e => { if (e.target.id === "playerModal") closeModal(); });
 
 /* ---------- Écran de fête : Samantha championne 👑 (musique kabyle) ---------- */
-const CELEB_VIDEO = "https://drive.google.com/file/d/165MU4m8uEtHg2K1dEOllw-_hPqc0UqXu/preview";
+const CELEB_VIDEO = "https://www.youtube.com/embed/Z13CQjLHnvQ?rel=0&autoplay=1&playsinline=1";
 function celebrateBurst() { confetti(); setTimeout(confetti, 800); setTimeout(confetti, 1600); }
 function showWinSplash() {
   const el = document.getElementById("winSplash"); if (!el) return;
-  const f = document.getElementById("ytFrame"); if (f && f.src !== CELEB_VIDEO) f.src = CELEB_VIDEO;
+  const f = document.getElementById("ytFrame"); if (f) f.src = CELEB_VIDEO;   // (re)lance la vidéo à chaque ouverture
   el.hidden = false; celebrateBurst(); try { playWin(); } catch (e) {}
 }
 window.openCelebration = showWinSplash;
