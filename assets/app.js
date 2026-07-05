@@ -198,12 +198,14 @@ function viewMatches() {
 
   const preds = S.predictions[p.id] || {};
   const sorted = [...S.matches].sort((a, b) => new Date(a.date) - new Date(b.date));
-  html += `<div class="hint">💡 Score exact = <b>${S.settings.ptsExact} pts</b> · Bon résultat = <b>${S.settings.ptsOutcome} pt</b>. Tu peux modifier tant que le match n'a pas commencé.</div>`;
+  html += `<div class="hint">💡 Score exact = <b>${S.settings.ptsExact} pts</b> · Bon résultat = <b>${S.settings.ptsOutcome} pt</b>. ⚠️ <b>Attention : une fois enregistré, un prono est définitif et ne peut plus être modifié.</b></div>`;
 
   for (const m of sorted) {
     const locked = isLocked(m);
     const pr = preds[m.id] || {};
     const res = m.result;
+    const committed = pr.locked === true;      // prono validé = définitif
+    const disabled = locked || committed;
     const gained = res ? pointsFor(pr, res) : null;
     html += `<div class="match" data-mid="${m.id}">
       <div class="match-top">
@@ -213,17 +215,18 @@ function viewMatches() {
       <div class="teams">
         <div class="team"><span class="flag">${m.a.flag}</span><span class="tname">${esc(m.a.name)}</span></div>
         <div class="score-inputs">
-          <input class="score-input" type="number" min="0" max="30" inputmode="numeric" data-side="a" value="${pr.a ?? ""}" ${locked ? "disabled" : ""} />
+          <input class="score-input" type="number" min="0" max="30" inputmode="numeric" data-side="a" value="${pr.a ?? ""}" ${disabled ? "disabled" : ""} />
           <span class="vs">–</span>
-          <input class="score-input" type="number" min="0" max="30" inputmode="numeric" data-side="b" value="${pr.b ?? ""}" ${locked ? "disabled" : ""} />
+          <input class="score-input" type="number" min="0" max="30" inputmode="numeric" data-side="b" value="${pr.b ?? ""}" ${disabled ? "disabled" : ""} />
         </div>
         <div class="team"><span class="flag">${m.b.flag}</span><span class="tname">${esc(m.b.name)}</span></div>
       </div>
       <div class="match-foot">
         <div>
           ${res ? `<span class="result-line">Résultat : <span class="r">${res.a}–${res.b}</span></span>` :
-      locked ? `<span class="locked-badge">🔒 Match en cours / terminé</span>` :
-        `<span class="saved-tag ${pr.a != null && pr.b != null ? "show" : ""}">✅ Prono enregistré</span>`}
+      committed ? `<span class="locked-badge">🔒 Prono validé : <b>${pr.a}–${pr.b}</b> · définitif</span>` :
+      locked ? `<span class="locked-badge">🔒 Match commencé — prono impossible</span>` :
+        (pr.a != null && pr.b != null) ? `<span class="saved-tag show">✏️ Brouillon — clique « Enregistrer » pour valider</span>` : ""}
         </div>
         <div class="inline">
           ${gained ? `<span class="pts-tag ${gained.kind === "exact" ? "pts-3" : gained.kind === "outcome" ? "pts-1" : "pts-0"}">+${gained.pts} pt${gained.pts > 1 ? "s" : ""}${gained.kind === "exact" ? " 🎯" : ""}</span>` : ""}
@@ -483,7 +486,20 @@ function wire() {
     });
   });
   const saveAll = $("#saveAll");
-  if (saveAll) saveAll.addEventListener("click", () => { save(); toast("💾 Pronos enregistrés !"); render(); });
+  if (saveAll) saveAll.addEventListener("click", () => {
+    const p = currentPlayer(); if (!p) return;
+    const preds = S.predictions[p.id] || {};
+    // pronos complets, pas encore verrouillés, et dont le match n'a pas commencé
+    const toLock = S.matches.filter(m => {
+      const pr = preds[m.id];
+      return pr && pr.a != null && pr.b != null && !pr.locked && !isLocked(m);
+    });
+    if (!toLock.length) { toast("Aucun nouveau prono à enregistrer"); return; }
+    const lignes = toLock.map(m => `• ${m.a.name} ${preds[m.id].a}–${preds[m.id].b} ${m.b.name}`).join("\n");
+    if (!confirm(`⚠️ ATTENTION : une fois enregistrés, ces ${toLock.length} prono(s) seront DÉFINITIFS et ne pourront PLUS être modifiés :\n\n${lignes}\n\nConfirmer l'enregistrement ?`)) return;
+    toLock.forEach(m => { S.predictions[p.id][m.id].locked = true; });
+    save(); toast("🔒 Pronos enregistrés et verrouillés !"); render();
+  });
 
   const pinBtn = $("#pinBtn");
   if (pinBtn) pinBtn.addEventListener("click", () => {
