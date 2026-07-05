@@ -290,7 +290,7 @@ function viewMatches() {
     const committed = pr.locked === true;      // prono validé = définitif
     const disabled = locked || committed;
     const gained = res ? pointsFor(pr, res) : null;
-    const canReveal = committed || locked || !!res;   // on peut voir les autres une fois SON prono validé (ou match commencé)
+    const canReveal = committed;   // on ne voit les pronos des autres (et de Claude) qu'une fois SON prono validé
     html += `<div class="match" data-mid="${m.id}">
       <div class="match-top">
         <span class="stage-badge">${esc(m.stage)}</span>
