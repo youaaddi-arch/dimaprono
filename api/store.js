@@ -135,13 +135,13 @@ module.exports = async (req, res) => {
         const config = await getConfig();
         const matches = (config && config.matches) || [];
         const players = await allPlayers();
-        const now = Date.now();
         const reveal = {};
         for (const m of matches) {
-          const started = m.date && Date.parse(m.date) <= now;
           const myPr = (me.predictions || {})[m.id];
           const iLocked = myPr && myPr.a != null && myPr.locked === true;
-          if (!(started || iLocked || m.result)) continue;
+          // Règle stricte : on ne voit les pronos des autres (et de Claude)
+          // QUE si on a validé le sien pour ce match.
+          if (!iLocked) continue;
           reveal[m.id] = players.map((p) => {
             const pr = (p.predictions || {})[m.id];
             return (pr && pr.a != null) ? { name: p.name, avatar: p.avatar, a: pr.a, b: pr.b } : null;
