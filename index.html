@@ -18,10 +18,13 @@
              onerror="this.onerror=null;this.src='assets/logo.svg'" />
         <span class="brand-name">Dima<span class="brand-accent">Prono</span></span>
       </div>
-      <button class="who-chip" id="whoChip" title="Changer de joueur">
-        <span id="whoAvatar">🙂</span>
-        <span id="whoName">Invité</span>
-      </button>
+      <div class="top-actions">
+        <button class="icon-btn" id="muteBtn" title="Activer / couper les sons" onclick="toggleMute()">🔊</button>
+        <button class="who-chip" id="whoChip" title="Changer de joueur">
+          <span id="whoAvatar">🙂</span>
+          <span id="whoName">Invité</span>
+        </button>
+      </div>
     </header>
 
     <!-- Tabs -->
