@@ -83,6 +83,7 @@ const API = "/api/store";
 let ONLINE = false;          // true si la base partagée répond
 let SYNCED_ONCE = false;
 let SERVER_RANKING = null;   // classement calculé par le serveur (mode en ligne)
+let REVEAL = null;           // cache des pronos révélés (matchs où j'ai le droit de voir)
 
 function post(payload) {
   return fetch(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
@@ -105,6 +106,7 @@ async function syncPull(silent) {
     }
     // Le serveur renvoie UNIQUEMENT le classement (points), jamais les pronos des autres.
     SERVER_RANKING = d.ranking || [];
+    REVEAL = null;  // on rechargera les pronos révélés à la demande (données à jour)
     S.players = SERVER_RANKING.map(r => ({ id: r.id, name: r.name, avatar: r.avatar }));
     // Les pronos du joueur de cet appareil restent en local (privés).
     // Si le joueur de cet appareil n'existe plus côté serveur, on le déconnecte.
@@ -172,22 +174,24 @@ function pointsFor(pred, result) {
   return { pts: 0, kind: "miss" };
 }
 function playerScore(playerId) {
-  let pts = 0, exact = 0, good = 0, played = 0;
+  let pts = 0, exact = 0, good = 0, played = 0, filled = 0;
   const preds = S.predictions[playerId] || {};
   for (const m of S.matches) {
+    const pr = preds[m.id];
+    if (pr && pr.a != null) filled++;
     if (!m.result) continue;
-    const r = pointsFor(preds[m.id], m.result);
-    if (preds[m.id]) played++;
+    const r = pointsFor(pr, m.result);
+    if (pr && pr.a != null) played++;
     pts += r.pts;
     if (r.kind === "exact") exact++;
     else if (r.kind === "outcome") good++;
   }
-  return { pts, exact, good, played };
+  return { pts, exact, good, played, filled };
 }
 function ranking() {
   // En ligne : le serveur calcule les points (sans exposer les pronos des autres).
   if (ONLINE && SERVER_RANKING) {
-    return SERVER_RANKING.map(r => ({ player: { id: r.id, name: r.name, avatar: r.avatar }, pts: r.pts, exact: r.exact, good: r.good, played: r.played }));
+    return SERVER_RANKING.map(r => ({ player: { id: r.id, name: r.name, avatar: r.avatar }, pts: r.pts, exact: r.exact, good: r.good, played: r.played, filled: r.filled }));
   }
   // Hors-ligne : calcul local.
   return S.players
@@ -286,6 +290,7 @@ function viewMatches() {
     const committed = pr.locked === true;      // prono validé = définitif
     const disabled = locked || committed;
     const gained = res ? pointsFor(pr, res) : null;
+    const canReveal = committed || locked || !!res;   // on peut voir les autres une fois SON prono validé (ou match commencé)
     html += `<div class="match" data-mid="${m.id}">
       <div class="match-top">
         <span class="stage-badge">${esc(m.stage)}</span>
@@ -309,6 +314,7 @@ function viewMatches() {
         </div>
         <div class="inline">
           ${gained ? `<span class="pts-tag ${gained.kind === "exact" ? "pts-3" : gained.kind === "outcome" ? "pts-1" : "pts-0"}">+${gained.pts} pt${gained.pts > 1 ? "s" : ""}${gained.kind === "exact" ? " 🎯" : ""}</span>` : ""}
+          ${canReveal ? `<button class="btn btn-sm btn-ghost" onclick="showPronos('${m.id}')">👀 Voir les pronos</button>` : ""}
         </div>
       </div>
     </div>`;
@@ -337,7 +343,7 @@ function viewRanking() {
         <div class="rank-pos">${medal}</div>
         <div class="rank-id"><span class="av">${r.player.avatar}</span>
           <div><div class="nm">${esc(r.player.name)}${me ? " (toi)" : ""}</div>
-          <div class="sub">🎯 ${r.exact} exact${r.exact > 1 ? "s" : ""} · ✅ ${r.good} bon${r.good > 1 ? "s" : ""} · ${r.played} joué${r.played > 1 ? "s" : ""}</div></div>
+          <div class="sub">📝 ${r.filled || 0} prono${(r.filled || 0) > 1 ? "s" : ""} · 🎯 ${r.exact} exact${r.exact > 1 ? "s" : ""} · ✅ ${r.good} bon${r.good > 1 ? "s" : ""}</div></div>
         </div>
         <div class="rank-pts"><b>${r.pts}</b><small>PTS</small></div>
       </div>`;
@@ -530,6 +536,7 @@ function wire() {
     const lignes = toLock.map(m => `• ${m.a.name} ${preds[m.id].a}–${preds[m.id].b} ${m.b.name}`).join("\n");
     if (!confirm(`⚠️ ATTENTION : une fois enregistrés, ces ${toLock.length} prono(s) seront DÉFINITIFS et ne pourront PLUS être modifiés :\n\n${lignes}\n\nConfirmer l'enregistrement ?`)) return;
     toLock.forEach(m => { S.predictions[p.id][m.id].locked = true; });
+    REVEAL = null;  // nouveaux pronos validés -> on pourra voir ceux des autres
     save(); pushPlayer(p.id); toast("🔒 Pronos enregistrés et verrouillés !"); render();
   });
 
@@ -546,6 +553,28 @@ function wire() {
    ============================================================ */
 window.setAdminSub = s => { adminSub = s; render(); };
 window.confetti = confetti;
+
+// Voir les pronos des autres pour un match (autorisé une fois le sien validé / match commencé).
+window.showPronos = async (mid) => {
+  const m = S.matches.find(x => x.id === mid); if (!m) return;
+  let list;
+  if (ONLINE) {
+    if (!REVEAL) {
+      const r = await post({ action: "reveal", id: S.currentPlayerId, pin: S.currentPin });
+      REVEAL = (r && r.ok) ? (r.reveal || {}) : {};
+    }
+    list = REVEAL[mid];
+    if (!list) { toast("🔒 Valide d'abord ton prono pour voir ceux des autres"); return; }
+  } else {
+    list = S.players.map(p => {
+      const pr = (S.predictions[p.id] || {})[mid];
+      return (pr && pr.a != null) ? { name: p.name, avatar: p.avatar, a: pr.a, b: pr.b } : null;
+    }).filter(Boolean);
+  }
+  if (!list.length) { toast("Personne n'a encore mis de prono ici"); return; }
+  const res = m.result ? `\nRésultat : ${m.result.a}–${m.result.b}` : "";
+  alert(`Pronos — ${m.a.name} vs ${m.b.name}${res}\n\n` + list.map(x => `${x.avatar} ${x.name} : ${x.a}–${x.b}`).join("\n"));
+};
 
 window.saveResult = mid => {
   const card = $(`.admin-match[data-mid="${mid}"]`);
