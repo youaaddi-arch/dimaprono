@@ -319,7 +319,8 @@ function viewMatches() {
     const pr = preds[m.id] || {};
     const res = m.result;
     const committed = pr.locked === true;      // prono validé = définitif
-    const disabled = locked || committed;
+    const started = locked || !!m.live || !!res;   // match commencé -> saisie impossible (anti-triche)
+    const disabled = started || committed;
     const gained = res ? pointsFor(pr, res) : null;
     const canReveal = committed;   // on ne voit les pronos des autres (et de Claude) qu'une fois SON prono validé
     html += `<div class="match" data-mid="${m.id}">

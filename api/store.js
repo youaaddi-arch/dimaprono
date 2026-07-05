@@ -242,7 +242,26 @@ module.exports = async (req, res) => {
         if (String(doc.pin || "") !== String(body.pin || "")) { res.status(403).json({ ok: false, error: "badpin" }); return; }
         doc.name = p.name || doc.name;
         doc.avatar = p.avatar || doc.avatar;
-        doc.predictions = body.predictions || doc.predictions || {};
+        // ANTI-TRICHE : on n'accepte un prono QUE si le match n'a pas commencé,
+        // et on ne modifie jamais un prono déjà verrouillé.
+        const cfg = await getConfig();
+        const now = Date.now();
+        const started = {};
+        ((cfg && cfg.matches) || []).forEach((m) => {
+          started[m.id] = Boolean(m.live) || Boolean(m.result) || (m.date && Date.parse(m.date) <= now);
+        });
+        const incoming = body.predictions || {};
+        const existing = doc.predictions || {};
+        const finalPreds = {};
+        // 1) on conserve tous les pronos déjà verrouillés (définitifs, jamais modifiables)
+        for (const id in existing) { if (existing[id] && existing[id].locked) finalPreds[id] = existing[id]; }
+        // 2) on accepte les nouveaux pronos uniquement pour les matchs pas commencés
+        for (const id in incoming) {
+          if (finalPreds[id]) continue;        // déjà verrouillé -> on ne touche pas
+          if (started[id]) continue;           // match commencé -> refusé
+          finalPreds[id] = incoming[id];
+        }
+        doc.predictions = finalPreds;
         await redis(["SET", K_PLAYER(p.id), JSON.stringify(doc)]);
         res.status(200).json({ ok: true });
         return;
