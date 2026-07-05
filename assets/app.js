@@ -574,9 +574,54 @@ window.showPronos = async (mid) => {
     }).filter(Boolean);
   }
   if (!list.length) { toast("Personne n'a encore mis de prono ici"); return; }
-  const res = m.result ? `\nRésultat : ${m.result.a}–${m.result.b}` : "";
-  alert(`Pronos — ${m.a.name} vs ${m.b.name}${res}\n\n` + list.map(x => `${x.avatar} ${x.name} : ${x.a}–${x.b}`).join("\n"));
+  openRevealModal(m, list);
 };
+
+function isClaude(x) { return x && (x.avatar === "🤖" || /^claude$/i.test(x.name || "")); }
+
+function openRevealModal(m, list) {
+  const claude = list.find(isClaude);
+  const humans = list.filter(x => !isClaude(x));
+  let statsHtml = "";
+
+  if (claude) {
+    statsHtml += `<div class="gift" style="border-color:rgba(240,192,64,.5)">
+      <span class="rk">🤖</span>
+      <div class="gtxt"><b>Le prono de Claude (analyse)</b>
+        <span>${m.a.flag} ${esc(m.a.name)} <b style="color:var(--gold)">${claude.a}–${claude.b}</b> ${esc(m.b.name)} ${m.b.flag}</span></div>
+    </div>`;
+  }
+  if (humans.length) {
+    const avgA = humans.reduce((s, x) => s + (+x.a), 0) / humans.length;
+    const avgB = humans.reduce((s, x) => s + (+x.b), 0) / humans.length;
+    const freq = {};
+    humans.forEach(x => { const k = x.a + "–" + x.b; freq[k] = (freq[k] || 0) + 1; });
+    const best = Object.entries(freq).sort((a, b) => b[1] - a[1])[0];
+    statsHtml += `<div class="gift"><span class="rk">📊</span>
+      <div class="gtxt"><b>Moyenne du groupe</b><span>${avgA.toFixed(1)} – ${avgB.toFixed(1)} (sur ${humans.length} joueur${humans.length > 1 ? "s" : ""})</span></div></div>`;
+    statsHtml += `<div class="gift"><span class="rk">⭐</span>
+      <div class="gtxt"><b>Le prono le plus choisi</b><span><b>${best[0]}</b> · ${best[1]} joueur${best[1] > 1 ? "s" : ""}</span></div></div>`;
+  }
+
+  const listHtml = list.map(x => `<div class="gift" style="padding:8px 12px${isClaude(x) ? ";border-color:rgba(240,192,64,.5)" : ""}">
+      <span class="rk" style="font-size:18px">${x.avatar}</span>
+      <div class="gtxt"><b>${esc(x.name)}${isClaude(x) ? " 🤖" : ""}</b><span>${x.a}–${x.b}</span></div>
+    </div>`).join("");
+
+  const back = document.createElement("div");
+  back.className = "modal-backdrop";
+  back.innerHTML = `<div class="modal">
+      <h2 style="font-size:18px">${m.a.flag} ${esc(m.a.name)} <span class="muted">vs</span> ${esc(m.b.name)} ${m.b.flag}</h2>
+      ${m.result ? `<p class="muted" style="margin:2px 0 0">Résultat : <b style="color:var(--gold)">${m.result.a}–${m.result.b}</b></p>` : `<p class="muted" style="margin:2px 0 0">${esc(m.stage)}</p>`}
+      <div class="gift-list" style="margin-top:14px">${statsHtml}</div>
+      <div class="divider"></div>
+      <p class="small-muted" style="margin:0 0 8px">Tous les pronos</p>
+      <div class="gift-list">${listHtml}</div>
+      <button class="btn btn-primary btn-block" style="margin-top:14px" onclick="this.closest('.modal-backdrop').remove()">Fermer</button>
+    </div>`;
+  back.addEventListener("click", e => { if (e.target === back) back.remove(); });
+  document.body.appendChild(back);
+}
 
 // Valider UN seul prono (match par match), sans toucher aux autres.
 window.validateMatch = (mid) => {
