@@ -281,7 +281,7 @@ function viewMatches() {
 
   const preds = S.predictions[p.id] || {};
   const sorted = [...S.matches].sort((a, b) => new Date(a.date) - new Date(b.date));
-  html += `<div class="hint">💡 Score exact = <b>${S.settings.ptsExact} pts</b> · Bon résultat = <b>${S.settings.ptsOutcome} pt</b>. ⚠️ <b>Attention : une fois enregistré, un prono est définitif et ne peut plus être modifié.</b></div>`;
+  html += `<div class="hint">💡 Score exact = <b>${S.settings.ptsExact} pts</b> · Bon résultat = <b>${S.settings.ptsOutcome} pt</b>.<br>✅ Tu peux valider tes pronos <b>match par match</b> (pas besoin de tout faire d'un coup). ⚠️ Un prono validé est <b>définitif</b>.</div>`;
 
   for (const m of sorted) {
     const locked = isLocked(m);
@@ -310,16 +310,17 @@ function viewMatches() {
           ${res ? `<span class="result-line">Résultat : <span class="r">${res.a}–${res.b}</span></span>` :
       committed ? `<span class="locked-badge">🔒 Prono validé : <b>${pr.a}–${pr.b}</b> · définitif</span>` :
       locked ? `<span class="locked-badge">🔒 Match commencé — prono impossible</span>` :
-        (pr.a != null && pr.b != null) ? `<span class="saved-tag show">✏️ Brouillon — clique « Enregistrer » pour valider</span>` : ""}
+        (pr.a != null && pr.b != null) ? `<span class="saved-tag show">✏️ Brouillon — pas encore validé</span>` : ""}
         </div>
         <div class="inline">
           ${gained ? `<span class="pts-tag ${gained.kind === "exact" ? "pts-3" : gained.kind === "outcome" ? "pts-1" : "pts-0"}">+${gained.pts} pt${gained.pts > 1 ? "s" : ""}${gained.kind === "exact" ? " 🎯" : ""}</span>` : ""}
+          ${(!disabled && !res) ? `<button class="btn btn-sm btn-primary" onclick="validateMatch('${m.id}')">✅ Valider ce prono</button>` : ""}
           ${canReveal ? `<button class="btn btn-sm btn-ghost" onclick="showPronos('${m.id}')">👀 Voir les pronos</button>` : ""}
         </div>
       </div>
     </div>`;
   }
-  html += `<div class="savebar"><button class="btn btn-primary btn-block" id="saveAll">💾 Enregistrer mes pronos</button></div>`;
+  html += `<div class="savebar"><button class="btn btn-primary btn-block" id="saveAll">💾 Tout valider d'un coup (pronos remplis)</button></div>`;
   html += `</div>`;
   return html;
 }
@@ -521,6 +522,7 @@ function wire() {
       S.predictions[p.id][mid] = S.predictions[p.id][mid] || {};
       const v = inp.value === "" ? null : Math.max(0, Math.min(30, +inp.value));
       S.predictions[p.id][mid][side] = v;
+      save(); // on garde le brouillon localement (pas encore validé)
     });
   });
   const saveAll = $("#saveAll");
@@ -574,6 +576,20 @@ window.showPronos = async (mid) => {
   if (!list.length) { toast("Personne n'a encore mis de prono ici"); return; }
   const res = m.result ? `\nRésultat : ${m.result.a}–${m.result.b}` : "";
   alert(`Pronos — ${m.a.name} vs ${m.b.name}${res}\n\n` + list.map(x => `${x.avatar} ${x.name} : ${x.a}–${x.b}`).join("\n"));
+};
+
+// Valider UN seul prono (match par match), sans toucher aux autres.
+window.validateMatch = (mid) => {
+  const p = currentPlayer(); if (!p) { toast("Choisis ton joueur"); return; }
+  const m = S.matches.find(x => x.id === mid); if (!m) return;
+  const pr = (S.predictions[p.id] || {})[mid];
+  if (!pr || pr.a == null || pr.b == null) { toast("Entre les 2 scores d'abord ✍️"); return; }
+  if (isLocked(m)) { toast("🔒 Match déjà commencé"); return; }
+  if (pr.locked) { toast("Déjà validé ✅"); return; }
+  if (!confirm(`✅ Valider ton prono : ${m.a.name} ${pr.a}–${pr.b} ${m.b.name} ?\n\n⚠️ Il sera DÉFINITIF et ne pourra plus être modifié.`)) return;
+  S.predictions[p.id][mid].locked = true;
+  REVEAL = null;
+  save(); pushPlayer(p.id); toast("🔒 Prono validé !"); render();
 };
 
 window.saveResult = mid => {
