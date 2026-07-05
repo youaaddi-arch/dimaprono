@@ -50,6 +50,7 @@ function defaultState() {
       ],
     },
     currentPlayerId: null,
+    currentPin: null,   // code secret du joueur de cet appareil (jamais partagé sauf pour s'authentifier)
   };
 }
 
@@ -81,6 +82,7 @@ function uid() { return "id" + Math.random().toString(36).slice(2, 9); }
 const API = "/api/store";
 let ONLINE = false;          // true si la base partagée répond
 let SYNCED_ONCE = false;
+let SERVER_RANKING = null;   // classement calculé par le serveur (mode en ligne)
 
 function post(payload) {
   return fetch(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
@@ -101,25 +103,12 @@ async function syncPull(silent) {
       // Base vide : on l'initialise avec le calendrier/local courant.
       await pushConfig();
     }
-    // Le serveur fait foi pour la liste des joueurs et leurs pronos.
-    S.players = (d.players || []).map(p => ({ id: p.id, name: p.name, avatar: p.avatar }));
-    const preds = {};
-    (d.players || []).forEach(p => { preds[p.id] = p.predictions || {}; });
-    // On préserve les brouillons non enregistrés du joueur de cet appareil
-    // (les pronos verrouillés côté serveur restent définitifs).
-    const meId = S.currentPlayerId;
-    if (meId && S.predictions[meId]) {
-      const serverMine = preds[meId] || {};
-      const localMine = S.predictions[meId];
-      const merged = { ...serverMine };
-      for (const mid in localMine) {
-        if (!serverMine[mid] || !serverMine[mid].locked) merged[mid] = localMine[mid];
-      }
-      preds[meId] = merged;
-    }
-    S.predictions = preds;
-    // Si le joueur de cet appareil n'existe plus côté serveur, on le désélectionne.
-    if (S.currentPlayerId && !S.players.some(p => p.id === S.currentPlayerId)) S.currentPlayerId = null;
+    // Le serveur renvoie UNIQUEMENT le classement (points), jamais les pronos des autres.
+    SERVER_RANKING = d.ranking || [];
+    S.players = SERVER_RANKING.map(r => ({ id: r.id, name: r.name, avatar: r.avatar }));
+    // Les pronos du joueur de cet appareil restent en local (privés).
+    // Si le joueur de cet appareil n'existe plus côté serveur, on le déconnecte.
+    if (S.currentPlayerId && !S.players.some(p => p.id === S.currentPlayerId)) { S.currentPlayerId = null; S.currentPin = null; }
     save();
     SYNCED_ONCE = true;
     updateNetBadge();
@@ -131,7 +120,14 @@ async function syncPull(silent) {
 async function pushPlayer(pid) {
   if (!ONLINE) return;
   const p = S.players.find(x => x.id === pid); if (!p) return;
-  await post({ action: "player", player: { id: p.id, name: p.name, avatar: p.avatar, predictions: S.predictions[pid] || {} } });
+  await post({ action: "player", player: { id: p.id, name: p.name, avatar: p.avatar }, pin: S.currentPin || "", predictions: S.predictions[pid] || {} });
+}
+async function createPlayerOnline(p, pin) {
+  if (!ONLINE) return { ok: true };
+  return (await post({ action: "createPlayer", player: { id: p.id, name: p.name, avatar: p.avatar }, pin })) || { ok: false };
+}
+async function loginOnline(id, pin) {
+  return (await post({ action: "login", id, pin })) || { ok: false };
 }
 async function pushConfig() {
   if (!ONLINE) return;
@@ -189,6 +185,11 @@ function playerScore(playerId) {
   return { pts, exact, good, played };
 }
 function ranking() {
+  // En ligne : le serveur calcule les points (sans exposer les pronos des autres).
+  if (ONLINE && SERVER_RANKING) {
+    return SERVER_RANKING.map(r => ({ player: { id: r.id, name: r.name, avatar: r.avatar }, pts: r.pts, exact: r.exact, good: r.good, played: r.played }));
+  }
+  // Hors-ligne : calcul local.
   return S.players
     .map(p => ({ player: p, ...playerScore(p.id) }))
     .sort((x, y) => y.pts - x.pts || y.exact - x.exact || y.good - x.good || x.player.name.localeCompare(y.player.name));
@@ -308,7 +309,6 @@ function viewMatches() {
         </div>
         <div class="inline">
           ${gained ? `<span class="pts-tag ${gained.kind === "exact" ? "pts-3" : gained.kind === "outcome" ? "pts-1" : "pts-0"}">+${gained.pts} pt${gained.pts > 1 ? "s" : ""}${gained.kind === "exact" ? " 🎯" : ""}</span>` : ""}
-          <button class="btn btn-sm btn-ghost" onclick="showMatchPronos('${m.id}')">👀 Voir les pronos</button>
         </div>
       </div>
     </div>`;
@@ -318,30 +318,22 @@ function viewMatches() {
   return html;
 }
 
-/* ---------- Vue CLASSEMENT ---------- */
-let rankMode = "global"; // global | detail
-let detailPlayerId = null;
+/* ---------- Vue CLASSEMENT (points uniquement — pronos privés) ---------- */
 function viewRanking() {
   const rk = ranking();
   let html = `<div class="view"><div class="section-head"><h2>🏆 Classement</h2>
     <span class="small-muted">${S.players.length} joueur${S.players.length > 1 ? "s" : ""}</span></div>`;
 
-  html += `<div class="chip-tab">
-    <button class="${rankMode === "global" ? "on" : ""}" onclick="setRankMode('global')">Général</button>
-    <button class="${rankMode === "detail" ? "on" : ""}" onclick="setRankMode('detail')">Pronos par joueur</button>
-  </div>`;
-
   if (!S.players.length) {
     return html + `<div class="empty"><div class="big">🙈</div><p>Aucun joueur pour l'instant.</p></div></div>`;
   }
 
-  if (rankMode === "global") {
-    html += `<div class="rank-list">`;
-    rk.forEach((r, i) => {
-      const pos = i + 1;
-      const medal = pos === 1 ? "🥇" : pos === 2 ? "🥈" : pos === 3 ? "🥉" : pos;
-      const me = r.player.id === S.currentPlayerId;
-      html += `<div class="rank-row rank-${pos} ${me ? "me" : ""}" onclick="openDetail('${r.player.id}')" style="cursor:pointer">
+  html += `<div class="rank-list">`;
+  rk.forEach((r, i) => {
+    const pos = i + 1;
+    const medal = pos === 1 ? "🥇" : pos === 2 ? "🥈" : pos === 3 ? "🥉" : pos;
+    const me = r.player.id === S.currentPlayerId;
+    html += `<div class="rank-row rank-${pos} ${me ? "me" : ""}">
         <div class="rank-pos">${medal}</div>
         <div class="rank-id"><span class="av">${r.player.avatar}</span>
           <div><div class="nm">${esc(r.player.name)}${me ? " (toi)" : ""}</div>
@@ -349,48 +341,10 @@ function viewRanking() {
         </div>
         <div class="rank-pts"><b>${r.pts}</b><small>PTS</small></div>
       </div>`;
-    });
-    html += `</div><p class="hint" style="margin-top:14px">👆 Touche un joueur pour voir tous ses pronos.</p>`;
-  } else {
-    // detail: pick a player, show all their pronos
-    const pid = detailPlayerId || (rk[0] && rk[0].player.id);
-    html += `<div class="field"><label>Choisir un joueur</label><select id="detailSelect">`;
-    rk.forEach(r => { html += `<option value="${r.player.id}" ${r.player.id === pid ? "selected" : ""}>${r.player.avatar} ${esc(r.player.name)} — ${r.pts} pts</option>`; });
-    html += `</select></div>`;
-    html += renderPlayerPronos(pid);
-  }
+  });
+  html += `</div><p class="hint" style="margin-top:14px">🔒 Les pronos de chacun restent <b>privés</b> : on ne voit que les points.</p>`;
 
   html += `</div>`;
-  return html;
-}
-
-function renderPlayerPronos(pid) {
-  const player = S.players.find(p => p.id === pid);
-  if (!player) return "";
-  const preds = S.predictions[pid] || {};
-  const sc = playerScore(pid);
-  let html = `<div class="card" style="text-align:center">
-      <div style="font-size:34px">${player.avatar}</div>
-      <h3 style="margin:4px 0 0">${esc(player.name)}</h3>
-      <p class="sub" style="margin:2px 0 0">${sc.pts} pts · 🎯 ${sc.exact} score${sc.exact > 1 ? "s" : ""} exact${sc.exact > 1 ? "s" : ""} · ✅ ${sc.good} bon résultat${sc.good > 1 ? "s" : ""}</p>
-    </div>`;
-  const sorted = [...S.matches].sort((a, b) => new Date(a.date) - new Date(b.date));
-  for (const m of sorted) {
-    const pr = preds[m.id];
-    const locked = isLocked(m);
-    const hidden = !locked && pid !== S.currentPlayerId; // ne pas dévoiler avant le coup d'envoi
-    const gained = m.result ? pointsFor(pr, m.result) : null;
-    html += `<div class="admin-match">
-      <div class="amt"><b>${m.a.flag} ${esc(m.a.name)} <span class="muted">vs</span> ${esc(m.b.name)} ${m.b.flag}</b>
-        <span class="match-date">${esc(m.stage)}</span></div>
-      <div class="inline" style="justify-content:space-between">
-        <span>${hidden ? `<span class="muted">🔒 Caché jusqu'au coup d'envoi</span>` :
-        pr && pr.a != null ? `Prono : <b>${pr.a}–${pr.b}</b>` : `<span class="muted">Pas de prono</span>`}
-          ${m.result ? ` · Résultat : <span class="r" style="color:var(--gold)">${m.result.a}–${m.result.b}</span>` : ""}</span>
-        ${gained && !hidden ? `<span class="pts-tag ${gained.kind === "exact" ? "pts-3" : gained.kind === "outcome" ? "pts-1" : "pts-0"}">+${gained.pts}</span>` : ""}
-      </div>
-    </div>`;
-  }
   return html;
 }
 
@@ -585,30 +539,13 @@ function wire() {
     else toast("❌ Code incorrect");
   });
 
-  const detailSelect = $("#detailSelect");
-  if (detailSelect) detailSelect.addEventListener("change", () => { detailPlayerId = detailSelect.value; render(); });
 }
 
 /* ============================================================
    ACTIONS globales (appelées via onclick)
    ============================================================ */
-window.setRankMode = m => { rankMode = m; render(); };
-window.openDetail = pid => { rankMode = "detail"; detailPlayerId = pid; render(); };
 window.setAdminSub = s => { adminSub = s; render(); };
 window.confetti = confetti;
-
-window.showMatchPronos = mid => {
-  const m = S.matches.find(x => x.id === mid);
-  const locked = isLocked(m);
-  const lines = S.players.map(p => {
-    const pr = (S.predictions[p.id] || {})[mid];
-    const hidden = !locked && p.id !== S.currentPlayerId;
-    const val = hidden ? "🔒" : (pr && pr.a != null ? `${pr.a}–${pr.b}` : "—");
-    return `${p.avatar} ${p.name} : ${val}`;
-  });
-  if (!lines.length) { toast("Aucun joueur"); return; }
-  alert(`Pronos — ${m.a.name} vs ${m.b.name}\n\n${lines.join("\n")}${!locked ? "\n\n(🔒 = caché jusqu'au coup d'envoi)" : ""}`);
-};
 
 window.saveResult = mid => {
   const card = $(`.admin-match[data-mid="${mid}"]`);
@@ -698,8 +635,8 @@ window.openPlayerModal = () => {
   const modal = $("#playerModal"); modal.hidden = false;
   const list = $("#playerList");
   list.innerHTML = S.players.length
-    ? S.players.map(p => `<div class="pchip" onclick="selectPlayer('${p.id}')">${p.avatar} ${esc(p.name)}</div>`).join("")
-    : `<span class="muted">Aucun profil pour l'instant.</span>`;
+    ? S.players.map(p => `<div class="pchip" onclick="loginPlayer('${p.id}')">${p.avatar} ${esc(p.name)}</div>`).join("")
+    : `<span class="muted">Aucun profil pour l'instant. Crée le tien ci-dessous 👇</span>`;
   const row = $("#avatarRow");
   row.innerHTML = AVATARS.map(a => `<span class="av-opt ${a === pickAvatar ? "sel" : ""}" data-a="${a}">${a}</span>`).join("");
   row.querySelectorAll(".av-opt").forEach(el => el.addEventListener("click", () => {
@@ -708,13 +645,35 @@ window.openPlayerModal = () => {
   }));
 };
 function closeModal() { $("#playerModal").hidden = true; }
-window.selectPlayer = pid => { S.currentPlayerId = pid; save(); closeModal(); render(); };
-$("#addPlayerBtn").addEventListener("click", () => {
+
+// Se connecter à un profil existant (code secret requis en ligne).
+window.loginPlayer = async (pid) => {
+  if (!ONLINE) { S.currentPlayerId = pid; save(); closeModal(); render(); return; }
+  const pin = prompt("🔒 Entre TON code secret pour te connecter à ce profil :");
+  if (pin == null) return;
+  const r = await loginOnline(pid, pin.trim());
+  if (r && r.ok) {
+    S.currentPlayerId = pid; S.currentPin = pin.trim();
+    S.predictions[pid] = r.player.predictions || {};
+    save(); closeModal(); render(); toast("Connecté ✅");
+  } else if (r && r.error === "badpin") toast("❌ Code secret incorrect");
+  else toast("❌ Connexion impossible");
+};
+
+$("#addPlayerBtn").addEventListener("click", async () => {
   const name = $("#newPlayerName").value.trim();
+  const pin = ($("#newPlayerPin").value || "").trim();
   if (!name) { toast("Entre un pseudo"); return; }
+  if (!/^\d{4,8}$/.test(pin)) { toast("Choisis un code secret de 4 à 8 chiffres 🔒"); return; }
   const p = { id: uid(), name, avatar: pickAvatar };
-  S.players.push(p); S.currentPlayerId = p.id; S.predictions[p.id] = {};
-  save(); pushPlayer(p.id); $("#newPlayerName").value = ""; closeModal(); render(); toast(`Bienvenue ${p.avatar} ${name} !`);
+  if (ONLINE) {
+    const r = await createPlayerOnline(p, pin);
+    if (!r || r.ok !== true) { toast("❌ Création impossible, réessaie"); return; }
+  }
+  S.players.push(p); S.currentPlayerId = p.id; S.currentPin = pin; S.predictions[p.id] = {};
+  save();
+  $("#newPlayerName").value = ""; $("#newPlayerPin").value = "";
+  closeModal(); render(); toast(`Bienvenue ${p.avatar} ${name} ! Retiens bien ton code 🔒`);
 });
 $("#whoChip").addEventListener("click", openPlayerModal);
 $("#playerModal").addEventListener("click", e => { if (e.target.id === "playerModal") closeModal(); });
