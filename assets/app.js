@@ -7,22 +7,26 @@ const STORE_KEY = "dimaprono_v1";
 const AVATARS = ["😎","🔥","⚽","🦁","🐐","🚀","👑","🎯","🧠","🍀","🐉","🦅","💪","🎩","🤠","🐧","🦊","🐼","🌟","🥷"];
 const FLAGS = ["🇫🇷","🇧🇷","🇦🇷","🏴","🇪🇸","🇵🇹","🇳🇱","🇩🇪","🇮🇹","🇧🇪","🇭🇷","🇲🇦","🇺🇸","🇲🇽","🇺🇾","🇯🇵","🇰🇷","🇸🇳","🇨🇦","🇨🇴","🇨🇭","🇩🇰","🇷🇸","🇬🇭","🏳️"];
 
-/* ---------- Données de départ : Coupe du Monde 2026 (modifiable) ---------- */
+/* ---------- Données de départ : Coupe du Monde 2026 — vrai calendrier (modifiable) ----------
+   Au 5 juillet 2026, seul le quart France–Maroc est confirmé ; les autres affiches
+   suivent le tableau officiel ("Vainqueur 8e …") en attendant la fin des huitièmes. */
+const SEED_VERSION = 2;
 function seedMatches() {
   return [
-    { id: uid(), stage: "Quart de finale", a: { name: "France", flag: "🇫🇷" }, b: { name: "Brésil", flag: "🇧🇷" }, date: "2026-07-09T21:00", result: null },
-    { id: uid(), stage: "Quart de finale", a: { name: "Argentine", flag: "🇦🇷" }, b: { name: "Angleterre", flag: "🏴" }, date: "2026-07-10T21:00", result: null },
-    { id: uid(), stage: "Quart de finale", a: { name: "Espagne", flag: "🇪🇸" }, b: { name: "Pays-Bas", flag: "🇳🇱" }, date: "2026-07-11T18:00", result: null },
-    { id: uid(), stage: "Quart de finale", a: { name: "Portugal", flag: "🇵🇹" }, b: { name: "Allemagne", flag: "🇩🇪" }, date: "2026-07-11T21:00", result: null },
-    { id: uid(), stage: "Demi-finale", a: { name: "À déterminer", flag: "🏳️" }, b: { name: "À déterminer", flag: "🏳️" }, date: "2026-07-14T21:00", result: null },
-    { id: uid(), stage: "Demi-finale", a: { name: "À déterminer", flag: "🏳️" }, b: { name: "À déterminer", flag: "🏳️" }, date: "2026-07-15T21:00", result: null },
-    { id: uid(), stage: "Petite finale", a: { name: "À déterminer", flag: "🏳️" }, b: { name: "À déterminer", flag: "🏳️" }, date: "2026-07-18T21:00", result: null },
-    { id: uid(), stage: "Finale", a: { name: "À déterminer", flag: "🏳️" }, b: { name: "À déterminer", flag: "🏳️" }, date: "2026-07-19T21:00", result: null },
+    { id: uid(), stage: "Quart de finale", venue: "Boston", a: { name: "France", flag: "🇫🇷" }, b: { name: "Maroc", flag: "🇲🇦" }, date: "2026-07-09T22:00", result: null },
+    { id: uid(), stage: "Quart de finale", venue: "Los Angeles", a: { name: "Vainqueur 8e-5", flag: "🏳️" }, b: { name: "Vainqueur 8e-6", flag: "🏳️" }, date: "2026-07-10T21:00", result: null },
+    { id: uid(), stage: "Quart de finale", venue: "Miami", a: { name: "Vainqueur 8e-3", flag: "🏳️" }, b: { name: "Vainqueur 8e-4", flag: "🏳️" }, date: "2026-07-11T18:00", result: null },
+    { id: uid(), stage: "Quart de finale", venue: "Kansas City", a: { name: "Vainqueur 8e-7", flag: "🏳️" }, b: { name: "Vainqueur 8e-8", flag: "🏳️" }, date: "2026-07-11T21:00", result: null },
+    { id: uid(), stage: "Demi-finale", venue: "Dallas", a: { name: "Vainqueur QF1", flag: "🏳️" }, b: { name: "Vainqueur QF2", flag: "🏳️" }, date: "2026-07-14T21:00", result: null },
+    { id: uid(), stage: "Demi-finale", venue: "Atlanta", a: { name: "Vainqueur QF3", flag: "🏳️" }, b: { name: "Vainqueur QF4", flag: "🏳️" }, date: "2026-07-15T21:00", result: null },
+    { id: uid(), stage: "3e place", venue: "Miami", a: { name: "Perdant DF1", flag: "🏳️" }, b: { name: "Perdant DF2", flag: "🏳️" }, date: "2026-07-18T21:00", result: null },
+    { id: uid(), stage: "Finale", venue: "New York / New Jersey", a: { name: "Finaliste 1", flag: "🏆" }, b: { name: "Finaliste 2", flag: "🏆" }, date: "2026-07-19T22:00", result: null },
   ];
 }
 
 function defaultState() {
   return {
+    seedVersion: SEED_VERSION,
     players: [],
     matches: seedMatches(),
     // predictions[playerId][matchId] = {a, b}
@@ -43,12 +47,20 @@ function defaultState() {
 
 /* ---------- Persistance ---------- */
 let S = load();
+save(); // persiste l'état (et une éventuelle migration du calendrier) dès le démarrage
 function load() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
     if (!raw) return defaultState();
     const parsed = JSON.parse(raw);
-    return { ...defaultState(), ...parsed, settings: { ...defaultState().settings, ...(parsed.settings || {}) } };
+    const merged = { ...defaultState(), ...parsed, settings: { ...defaultState().settings, ...(parsed.settings || {}) } };
+    // Migration : si le calendrier de départ a changé, on rafraîchit les matchs
+    // (les joueurs, le barème et les surprises sont conservés).
+    if (parsed.seedVersion !== SEED_VERSION) {
+      merged.matches = seedMatches();
+      merged.seedVersion = SEED_VERSION;
+    }
+    return merged;
   } catch (e) { return defaultState(); }
 }
 function save() { localStorage.setItem(STORE_KEY, JSON.stringify(S)); }
@@ -188,7 +200,7 @@ function viewMatches() {
     html += `<div class="match" data-mid="${m.id}">
       <div class="match-top">
         <span class="stage-badge">${esc(m.stage)}</span>
-        <span class="match-date">${fmtDate(m.date)}</span>
+        <span class="match-date">${fmtDate(m.date)}${m.venue ? " · 📍" + esc(m.venue) : ""}</span>
       </div>
       <div class="teams">
         <div class="team"><span class="flag">${m.a.flag}</span><span class="tname">${esc(m.a.name)}</span></div>
