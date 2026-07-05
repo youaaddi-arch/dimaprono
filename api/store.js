@@ -169,11 +169,24 @@ async function maybeRefreshLive() {
       const homeK = teamKey(am.homeTeam && am.homeTeam.name);
       const aScore = homeK === kA ? sh : sa;
       const bScore = homeK === kA ? sa : sh;
-      const live = st !== "FINISHED";
-      if (!m.result || m.result.a !== aScore || m.result.b !== bScore || m.live !== live) {
-        m.result = { a: aScore, b: bScore };
-        m.live = live;
-        changed = true;
+      if (st === "FINISHED") {
+        // Match terminé : c'est le score OFFICIEL -> il compte pour le classement.
+        if (!m.result || m.result.a !== aScore || m.result.b !== bScore || m.live) {
+          m.result = { a: aScore, b: bScore };
+          m.liveScore = { a: aScore, b: bScore };
+          m.live = false;
+          changed = true;
+        }
+      } else {
+        // Match EN COURS : score en direct SEULEMENT (affichage), ne compte PAS
+        // dans le classement tant que le match n'est pas fini.
+        const cur = m.liveScore || {};
+        if (!m.live || cur.a !== aScore || cur.b !== bScore || m.result) {
+          m.liveScore = { a: aScore, b: bScore };
+          m.live = true;
+          m.result = null;   // pas de points tant que ce n'est pas terminé
+          changed = true;
+        }
       }
     }
   }

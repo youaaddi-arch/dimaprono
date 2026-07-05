@@ -125,6 +125,15 @@ main { margin-top: 16px; }
 .score-input::-webkit-outer-spin-button, .score-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .score-input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(45,212,191,.25); }
 
+/* Grand score (match en direct / terminé) */
+.big-score { display: flex; align-items: center; gap: 10px; font-weight: 900; font-size: 44px; line-height: 1;
+  color: var(--gold); text-shadow: 0 3px 12px rgba(0,0,0,.5); }
+.big-score .bs-sep { color: var(--muted); font-size: 30px; }
+.big-score.is-live span:not(.bs-sep) { animation: scorepop .4s ease; }
+@keyframes scorepop { from { transform: scale(1.5); } to { transform: scale(1); } }
+.live-badge.done { background: #2f7a43; }
+.match.is-live { box-shadow: inset 0 0 0 1.5px rgba(226,59,59,.5), var(--shadow); }
+
 .match-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; gap: 10px; }
 .saved-tag { font-size: 12px; font-weight: 700; color: var(--primary-2); display: none; align-items: center; gap: 5px; }
 .saved-tag.show { display: inline-flex; }

@@ -138,6 +138,8 @@ async function pushConfig() {
 }
 async function pushDeletePlayer(id) { if (ONLINE) await post({ action: "deletePlayer", id }); }
 async function pushReset() { if (ONLINE) await post({ action: "reset" }); }
+// Rafraîchit le classement peu après une action (le serveur a le temps d'enregistrer).
+function refreshSoon() { if (ONLINE) setTimeout(() => syncPull(true), 500); }
 
 // Rafraîchit les vues "temps réel" (classement/podium) sans casser une saisie en cours.
 function refreshLiveViews() {
@@ -191,16 +193,18 @@ window.toggleMute = () => {
    ============================================================ */
 let prevSnap = null;
 function detectMatchEvents() {
+  const scoreOf = (m) => { const s = m.live ? m.liveScore : m.result; return s ? (s.a + "-" + s.b) : null; };
   const snap = {};
-  S.matches.forEach(m => { snap[m.id] = { s: m.result ? (m.result.a + "-" + m.result.b) : null, live: !!m.live }; });
+  S.matches.forEach(m => { snap[m.id] = { s: scoreOf(m), live: !!m.live }; });
   if (prevSnap === null) { prevSnap = snap; return; }   // 1er passage : pas d'alerte
   for (const m of S.matches) {
     const b = prevSnap[m.id], a = snap[m.id];
     if (!a) continue;
-    if (a.live && a.s && a.s !== (b && b.s)) {            // BUT en direct
-      let up = true;
-      if (b && b.s) { const [oa, ob] = b.s.split("-").map(Number), [na, nb] = a.s.split("-").map(Number); up = (na + nb) > (oa + ob); }
-      if (up) goalEvent(m);
+    if (a.live && a.s) {                                  // BUT en direct : le TOTAL de buts augmente
+      const [na, nb] = a.s.split("-").map(Number);
+      let oldTotal = 0;
+      if (b && b.s) { const [oa, ob] = b.s.split("-").map(Number); oldTotal = oa + ob; }
+      if ((na + nb) > oldTotal) goalEvent(m);             // 0-0 -> pas de BUT
     }
     if (b && b.live && !a.live && a.s) finishedEvent(m);  // FIN DU MATCH
   }
@@ -222,7 +226,8 @@ function notify(title, body) {
   } catch (e) {}
 }
 function goalEvent(m) {
-  const sc = m.result ? `${m.result.a}–${m.result.b}` : "";
+  const s = m.liveScore || m.result;
+  const sc = s ? `${s.a}–${s.b}` : "";
   eventBanner("", "⚽ BUT !", "", `${m.a.flag} ${esc(m.a.name)} <b>${sc}</b> ${esc(m.b.name)} ${m.b.flag}`);
   try { if (navigator.vibrate) navigator.vibrate([180, 90, 180]); } catch (e) {}
   confetti(); playGoal();
@@ -396,29 +401,33 @@ function viewMatches() {
     const committed = pr.locked === true;      // prono validé = définitif
     const started = locked || !!m.live || !!res;   // match commencé -> saisie impossible (anti-triche)
     const disabled = started || committed;
-    const gained = res ? pointsFor(pr, res) : null;
-    const canReveal = committed;   // on ne voit les pronos des autres (et de Claude) qu'une fois SON prono validé
-    html += `<div class="match" data-mid="${m.id}">
+    const gained = res ? pointsFor(pr, res) : null;   // points uniquement quand le match est TERMINÉ
+    const canReveal = committed;
+    const showScore = m.live ? m.liveScore : res;     // score à afficher en grand (direct ou final)
+    const hasProno = pr.a != null && pr.b != null;
+    html += `<div class="match ${m.live ? "is-live" : ""}" data-mid="${m.id}">
       <div class="match-top">
         <span class="stage-badge">${esc(m.stage)}</span>
-        ${m.live ? `<span class="live-badge">EN DIRECT</span>` : `<span class="match-date">${fmtDate(m.date)}${m.venue ? " · 📍" + esc(m.venue) : ""}</span>`}
+        ${m.live ? `<span class="live-badge">EN DIRECT</span>` : res ? `<span class="live-badge done">TERMINÉ</span>` : `<span class="match-date">${fmtDate(m.date)}${m.venue ? " · 📍" + esc(m.venue) : ""}</span>`}
       </div>
       <div class="teams">
         <div class="team"><span class="flag">${m.a.flag}</span><span class="tname">${esc(m.a.name)}</span></div>
-        <div class="score-inputs">
+        ${showScore
+        ? `<div class="big-score ${m.live ? "is-live" : ""}"><span>${showScore.a}</span><span class="bs-sep">–</span><span>${showScore.b}</span></div>`
+        : `<div class="score-inputs">
           <input class="score-input" type="number" min="0" max="30" inputmode="numeric" data-side="a" value="${pr.a ?? ""}" ${disabled ? "disabled" : ""} />
           <span class="vs">–</span>
           <input class="score-input" type="number" min="0" max="30" inputmode="numeric" data-side="b" value="${pr.b ?? ""}" ${disabled ? "disabled" : ""} />
-        </div>
+        </div>`}
         <div class="team"><span class="flag">${m.b.flag}</span><span class="tname">${esc(m.b.name)}</span></div>
       </div>
       <div class="match-foot">
         <div>
-          ${m.live && res ? `<span class="live-line">🔴 EN DIRECT · <span class="r">${res.a}–${res.b}</span></span>` :
-      res ? `<span class="result-line">Résultat : <span class="r">${res.a}–${res.b}</span></span>` :
+          ${m.live ? `<span class="live-line">🔴 EN DIRECT${hasProno ? ` · ton prono : <b>${pr.a}–${pr.b}</b>` : ``}</span>` :
+      res ? `<span class="result-line">🏁 Terminé${hasProno ? ` · ton prono : <b>${pr.a}–${pr.b}</b>` : ``}</span>` :
       committed ? `<span class="locked-badge">🔒 Prono validé : <b>${pr.a}–${pr.b}</b> · définitif</span>` :
       locked ? `<span class="locked-badge">🔒 Match commencé — prono impossible</span>` :
-        (pr.a != null && pr.b != null) ? `<span class="saved-tag show">✏️ Brouillon — pas encore validé</span>` : ""}
+        hasProno ? `<span class="saved-tag show">✏️ Brouillon — pas encore validé</span>` : ""}
         </div>
         <div class="inline">
           ${gained ? `<span class="pts-tag ${gained.kind === "exact" ? "pts-3" : gained.kind === "outcome" ? "pts-1" : "pts-0"}">+${gained.pts} pt${gained.pts > 1 ? "s" : ""}${gained.kind === "exact" ? " 🎯" : ""}</span>` : ""}
@@ -647,7 +656,7 @@ function wire() {
     if (!confirm(`⚠️ ATTENTION : une fois enregistrés, ces ${toLock.length} prono(s) seront DÉFINITIFS et ne pourront PLUS être modifiés :\n\n${lignes}\n\nConfirmer l'enregistrement ?`)) return;
     toLock.forEach(m => { S.predictions[p.id][m.id].locked = true; });
     REVEAL = null;  // nouveaux pronos validés -> on pourra voir ceux des autres
-    save(); pushPlayer(p.id); toast("🔒 Pronos enregistrés et verrouillés !"); render();
+    save(); pushPlayer(p.id); refreshSoon(); toast("🔒 Pronos enregistrés et verrouillés !"); render();
   });
 
   const pinBtn = $("#pinBtn");
@@ -743,7 +752,7 @@ window.validateMatch = (mid) => {
   if (!confirm(`✅ Valider ton prono : ${m.a.name} ${pr.a}–${pr.b} ${m.b.name} ?\n\n⚠️ Il sera DÉFINITIF et ne pourra plus être modifié.`)) return;
   S.predictions[p.id][mid].locked = true;
   REVEAL = null;
-  save(); pushPlayer(p.id); toast("🔒 Prono validé !"); render();
+  save(); pushPlayer(p.id); refreshSoon(); toast("🔒 Prono validé !"); render();
 };
 
 window.saveResult = mid => {
