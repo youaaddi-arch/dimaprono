@@ -85,6 +85,8 @@ let SYNCED_ONCE = false;
 let SERVER_RANKING = null;   // classement calculé par le serveur (mode en ligne)
 let REVEAL = null;           // cache des pronos révélés (matchs où j'ai le droit de voir)
 let CHEERS = 0;              // nombre de félicitations pour le/la 1er·e (partagé)
+let COMMENTS = [];          // commentaires du chat (partagés)
+let chatPrefill = "";       // texte pré-rempli (ex: mention depuis le podium)
 
 function post(payload) {
   return fetch(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
@@ -108,6 +110,7 @@ async function syncPull(silent) {
     // Le serveur renvoie UNIQUEMENT le classement (points), jamais les pronos des autres.
     SERVER_RANKING = d.ranking || [];
     CHEERS = d.cheers || 0;
+    COMMENTS = d.comments || [];
     REVEAL = null;  // on rechargera les pronos révélés à la demande (données à jour)
     S.players = SERVER_RANKING.map(r => ({ id: r.id, name: r.name, avatar: r.avatar }));
     // Les pronos du joueur de cet appareil restent en local (privés).
@@ -146,6 +149,11 @@ function refreshSoon() { if (ONLINE) setTimeout(() => syncPull(true), 500); }
 // Rafraîchit les vues "temps réel" (classement/podium) sans casser une saisie en cours.
 function refreshLiveViews() {
   if (activeTab === "ranking" || activeTab === "podium" || activeTab === "matches") render();
+  else if (activeTab === "chat") {
+    // met à jour les messages sans toucher à ce que l'utilisateur est en train d'écrire
+    const el = document.getElementById("chatList");
+    if (el) { const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40; el.innerHTML = chatListHtml(); if (atBottom) el.scrollTop = el.scrollHeight; }
+  }
 }
 
 /* ============================================================
@@ -364,9 +372,11 @@ function render() {
   const main = $("#main");
   if (activeTab === "matches") main.innerHTML = viewMatches();
   else if (activeTab === "ranking") main.innerHTML = viewRanking();
+  else if (activeTab === "chat") main.innerHTML = viewChat();
   else if (activeTab === "podium") main.innerHTML = viewPodium();
   else if (activeTab === "admin") main.innerHTML = viewAdmin();
   wire();
+  if (activeTab === "chat") scrollChatBottom();
 }
 
 function updateWhoChip() {
@@ -507,6 +517,8 @@ function viewPodium() {
       <div class="winner-head">👑 En tête : <b>${esc(leader.player.name)} ${leader.player.avatar}</b> · ${leader.pts} pts</div>
       <button class="btn btn-primary btn-block" onclick="cheerWinner('${esc(leader.player.name)}')">🎉 Féliciter ${esc(leader.player.name)} 👏</button>
       <div class="cheer-line">👏 <b id="cheerCount">${CHEERS}</b> félicitation${CHEERS > 1 ? "s" : ""}</div>
+      <button class="btn btn-block" style="margin-top:8px" onclick="openCelebration()">🎉 Voir la célébration 🎥</button>
+      <button class="btn btn-ghost btn-sm btn-block" style="margin-top:8px" onclick="commentAbout('${esc(leader.player.name)}')">💬 Commenter / chambrer ${esc(leader.player.name)}</button>
     </div>`;
   }
 
@@ -525,6 +537,58 @@ function viewPodium() {
   }
   html += `</div></div></div>`;
   return html;
+}
+
+/* ---------- Vue CHAT ---------- */
+function fmtTime(ts) { try { return new Date(ts).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }); } catch (e) { return ""; } }
+function renderMentions(text, names) {
+  const safe = esc(text);
+  const set = names.map(n => String(n).toLowerCase());
+  return safe.replace(/@([A-Za-z0-9À-ÿ_]+)/g, (m, nm) => set.includes(nm.toLowerCase()) ? `<span class="mention">@${nm}</span>` : m);
+}
+function chatListHtml() {
+  if (!COMMENTS.length) return `<div class="chat-empty">Pas encore de message… lance la causerie 😄🔥</div>`;
+  const meId = S.currentPlayerId;
+  const names = S.players.map(p => p.name);
+  return COMMENTS.map(c => `<div class="chat-msg ${c.id === meId ? "mine" : ""}">
+      <span class="cm-av">${c.avatar || "🙂"}</span>
+      <div class="cm-body"><div class="cm-head"><b>${esc(c.name)}</b> <span class="cm-time">${fmtTime(c.ts)}</span></div>
+      <div class="cm-text">${renderMentions(c.text, names)}</div></div>
+    </div>`).join("");
+}
+function scrollChatBottom() { const el = document.getElementById("chatList"); if (el) el.scrollTop = el.scrollHeight; }
+function viewChat() {
+  let html = `<div class="view"><div class="section-head"><h2>💬 Chat</h2><span class="small-muted">${COMMENTS.length} message${COMMENTS.length > 1 ? "s" : ""}</span></div>`;
+  if (!ONLINE) return html + `<div class="empty"><div class="big">🔌</div><p>Le chat nécessite le mode en ligne partagé.</p></div></div>`;
+  const p = currentPlayer();
+  if (!p) return html + `<div class="empty"><div class="big">💬</div><p>Connecte-toi pour participer au chat.</p><button class="btn btn-primary" onclick="openPlayerModal()">Choisir mon joueur</button></div></div>`;
+  html += `<div class="chat-list" id="chatList">${chatListHtml()}</div>`;
+  const others = S.players.filter(x => x.id !== p.id);
+  if (others.length) html += `<div class="mention-row">${others.map(o => `<button class="mention-chip" onclick="insertMention('${esc(o.name)}')">@${esc(o.name)}</button>`).join("")}</div>`;
+  html += `<div class="chat-input">
+      <input id="chatText" maxlength="280" placeholder="Ton message… (tag avec @)" value="${esc(chatPrefill)}" />
+      <button class="btn btn-primary" id="chatSend">Envoyer</button>
+    </div></div>`;
+  chatPrefill = "";
+  return html;
+}
+window.insertMention = (name) => {
+  const inp = document.getElementById("chatText"); if (!inp) return;
+  const sep = inp.value && !inp.value.endsWith(" ") ? " " : "";
+  inp.value = (inp.value + sep + "@" + name + " ").replace(/^\s+/, "");
+  inp.focus();
+};
+window.commentAbout = (name) => { chatPrefill = "@" + name + " "; setTab("chat"); };
+async function postComment() {
+  const p = currentPlayer(); if (!p) return;
+  const inp = document.getElementById("chatText"); if (!inp) return;
+  const text = (inp.value || "").trim();
+  if (!text) return;
+  if (!ONLINE) { toast("Chat en ligne uniquement"); return; }
+  inp.value = "";
+  const r = await post({ action: "comment", id: p.id, pin: S.currentPin, text });
+  if (r && r.ok) { await syncPull(true); scrollChatBottom(); }
+  else { toast("❌ Envoi impossible"); inp.value = text; }
 }
 
 /* ---------- Vue ORGA (admin) ---------- */
@@ -642,6 +706,11 @@ function adminSettings() {
    WIRING (événements après chaque render)
    ============================================================ */
 function wire() {
+  // chat
+  const chatSend = $("#chatSend");
+  if (chatSend) chatSend.addEventListener("click", postComment);
+  const chatText = $("#chatText");
+  if (chatText) chatText.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); postComment(); } });
   // score inputs (matchs)
   $$("#main .match .score-input").forEach(inp => {
     inp.addEventListener("input", () => {
@@ -919,6 +988,19 @@ $("#addPlayerBtn").addEventListener("click", async () => {
 $("#whoChip").addEventListener("click", openPlayerModal);
 $("#playerModal").addEventListener("click", e => { if (e.target.id === "playerModal") closeModal(); });
 
+/* ---------- Écran de fête : Samantha championne 👑 (musique kabyle) ---------- */
+const YT_ID = "UMlBGFjLmqI";
+function showWinSplash() { const el = document.getElementById("winSplash"); if (!el) return; el.hidden = false; confetti(); }
+window.openCelebration = showWinSplash;
+function closeWinSplash() { const el = document.getElementById("winSplash"); if (el) el.hidden = true; const f = document.getElementById("ytFrame"); if (f) f.src = ""; }
+document.getElementById("playMusic") && document.getElementById("playMusic").addEventListener("click", () => {
+  const f = document.getElementById("ytFrame");
+  if (f) f.src = "https://www.youtube.com/embed/" + YT_ID + "?autoplay=1&rel=0";
+  confetti(); try { playWin(); } catch (e) {}
+});
+document.getElementById("closeSplash") && document.getElementById("closeSplash").addEventListener("click", closeWinSplash);
+document.getElementById("winSplash") && document.getElementById("winSplash").addEventListener("click", e => { if (e.target.id === "winSplash") closeWinSplash(); });
+
 /* ============================================================
    INIT
    ============================================================ */
@@ -930,6 +1012,11 @@ render();
   await syncPull();
   // Premier lancement : proposer la création de profil si personne n'existe (local + serveur).
   if (!S.currentPlayerId && !S.players.length) setTimeout(() => openPlayerModal(), 300);
+  // Écran de fête (une fois par session) si la partie existe déjà.
+  else if (S.players.length && !sessionStorage.getItem("dimaprono_splash")) {
+    sessionStorage.setItem("dimaprono_splash", "1");
+    setTimeout(showWinSplash, 500);
+  }
   updateNetBadge();
 })();
 

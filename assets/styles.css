@@ -60,16 +60,17 @@ body {
 
 /* Tabs */
 .tabs {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px;
   background: var(--card); border: 1px solid var(--stroke); padding: 6px;
   border-radius: 16px; position: sticky; top: 58px; z-index: 19; backdrop-filter: blur(10px);
 }
 .tab {
   display: flex; flex-direction: column; align-items: center; gap: 2px;
   border: 0; background: transparent; color: var(--muted); font-weight: 700;
-  font-size: 12px; padding: 9px 4px; border-radius: 12px; cursor: pointer; transition: .18s;
+  font-size: 10.5px; padding: 9px 2px; border-radius: 12px; cursor: pointer; transition: .18s;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
 }
-.tab span { font-size: 19px; }
+.tab span { font-size: 18px; }
 .tab.is-active { background: linear-gradient(180deg, rgba(240,192,64,.24), rgba(216,165,32,.12)); color: var(--text); box-shadow: inset 0 0 0 1px rgba(240,192,64,.4); }
 
 .net-badge { text-align: center; font-size: 11px; font-weight: 700; margin: 8px 2px 0; padding: 4px 0;
@@ -294,6 +295,33 @@ textarea { resize: vertical; min-height: 60px; }
 .cheer-line { margin-top: 8px; font-size: 13px; color: var(--muted); }
 .cheer-line b { color: var(--gold); font-size: 15px; }
 .goal-banner.celebrate .gb-in { background: linear-gradient(180deg, #ffe58a, #e6b422); }
+
+/* Chat */
+.chat-list { display: flex; flex-direction: column; gap: 8px; max-height: 58vh; overflow-y: auto;
+  -webkit-overflow-scrolling: touch; padding: 4px 2px; margin-bottom: 10px; }
+.chat-empty { text-align: center; color: var(--muted); padding: 30px 10px; }
+.chat-msg { display: flex; gap: 9px; align-items: flex-start; }
+.chat-msg .cm-av { font-size: 22px; line-height: 1; }
+.chat-msg .cm-body { background: var(--card); border: 1px solid var(--stroke); border-radius: 4px 14px 14px 14px; padding: 8px 12px; max-width: 82%; }
+.chat-msg.mine { flex-direction: row-reverse; }
+.chat-msg.mine .cm-body { background: linear-gradient(180deg, rgba(240,192,64,.18), rgba(216,165,32,.08)); border-color: rgba(240,192,64,.35); border-radius: 14px 4px 14px 14px; }
+.cm-head { font-size: 12px; margin-bottom: 2px; }
+.cm-head b { color: var(--text); }
+.cm-time { color: var(--muted); font-size: 10px; margin-left: 4px; }
+.cm-text { font-size: 14px; line-height: 1.35; word-break: break-word; }
+.mention { color: var(--primary); font-weight: 800; background: rgba(240,192,64,.12); padding: 0 4px; border-radius: 6px; }
+.mention-row { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 6px; }
+.mention-chip { flex: 0 0 auto; border: 1px solid var(--stroke); background: var(--card); color: var(--primary);
+  padding: 5px 10px; border-radius: 999px; font-weight: 700; font-size: 12px; cursor: pointer; }
+.chat-input { display: flex; gap: 8px; position: sticky; bottom: 12px; }
+.chat-input input { flex: 1; }
+
+/* Écran de fête (championne) */
+.modal.splash { text-align: center; }
+.modal.splash .splash-emoji { font-size: 46px; animation: bob 2s ease-in-out infinite; }
+.modal.splash h2 { margin: 6px 0 2px; }
+.yt-wrap { margin: 14px 0; border-radius: 14px; overflow: hidden; border: 1px solid var(--stroke); background: #000; min-height: 60px; }
+.yt-wrap iframe { display: block; width: 100%; border: 0; }
 
 .empty { text-align: center; color: var(--muted); padding: 40px 16px; }
 .empty .big { font-size: 40px; margin-bottom: 8px; }

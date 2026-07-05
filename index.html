@@ -19,6 +19,7 @@
         <span class="brand-name">Dima<span class="brand-accent">Prono</span></span>
       </div>
       <div class="top-actions">
+        <button class="icon-btn" id="celebBtn" title="Voir la célébration 🎉" onclick="openCelebration()">🎉</button>
         <button class="icon-btn" id="muteBtn" title="Activer / couper les sons" onclick="toggleMute()">🔊</button>
         <button class="who-chip" id="whoChip" title="Changer de joueur">
           <span id="whoAvatar">🙂</span>
@@ -31,6 +32,7 @@
     <nav class="tabs" id="tabs">
       <button class="tab is-active" data-tab="matches"><span>⚽</span>Matchs</button>
       <button class="tab" data-tab="ranking"><span>🏆</span>Classement</button>
+      <button class="tab" data-tab="chat"><span>💬</span>Chat</button>
       <button class="tab" data-tab="podium"><span>🎁</span>Podium</button>
       <button class="tab" data-tab="admin"><span>⚙️</span>Orga</button>
     </nav>
@@ -58,6 +60,19 @@
         <button class="btn btn-primary" id="addPlayerBtn">Créer mon profil</button>
         <p class="muted" style="margin:0;font-size:12px">🔒 Ton code secret te permet de te connecter et empêche les autres de jouer à ta place ou de voir tes pronos.</p>
       </div>
+    </div>
+  </div>
+
+  <!-- Écran de fête : Samantha championne 👑 (musique kabyle) -->
+  <div class="modal-backdrop" id="winSplash" hidden>
+    <div class="modal splash">
+      <div class="splash-emoji">👑🏆</div>
+      <h2>Samantha a gagné&nbsp;!</h2>
+      <p class="muted">Fière Kabyle ⵣ 🎉 — respect à la championne&nbsp;!</p>
+      <div class="yt-wrap"><iframe id="ytFrame" src="" width="100%" height="200" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen loading="lazy"></iframe></div>
+      <button class="btn btn-primary btn-block" id="playMusic">🎵 Lancer la musique</button>
+      <a class="link" id="ytFallback" href="https://www.youtube.com/watch?v=UMlBGFjLmqI" target="_blank" rel="noopener" style="display:block;text-align:center;margin-top:8px;font-size:13px">▶️ Ouvrir sur YouTube</a>
+      <button class="btn btn-ghost btn-block" style="margin-top:8px" id="closeSplash">Fermer</button>
     </div>
   </div>
 
