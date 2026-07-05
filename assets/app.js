@@ -74,6 +74,84 @@ function load() {
 function save() { localStorage.setItem(STORE_KEY, JSON.stringify(S)); }
 function uid() { return "id" + Math.random().toString(36).slice(2, 9); }
 
+/* ============================================================
+   SYNCHRONISATION EN LIGNE (base partagée via /api/store)
+   Repli automatique en mode local si la base n'est pas configurée.
+   ============================================================ */
+const API = "/api/store";
+let ONLINE = false;          // true si la base partagée répond
+let SYNCED_ONCE = false;
+
+function post(payload) {
+  return fetch(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+    .then(r => r.json()).catch(() => null);
+}
+
+async function syncPull(silent) {
+  try {
+    const r = await fetch(API, { cache: "no-store" });
+    const d = await r.json();
+    if (!d || !d.online) { ONLINE = false; updateNetBadge(); return; }
+    const wasOffline = !ONLINE;
+    ONLINE = true;
+    if (d.config && Array.isArray(d.config.matches) && d.config.matches.length) {
+      S.matches = d.config.matches;
+      if (d.config.settings) S.settings = { ...S.settings, ...d.config.settings };
+    } else {
+      // Base vide : on l'initialise avec le calendrier/local courant.
+      await pushConfig();
+    }
+    // Le serveur fait foi pour la liste des joueurs et leurs pronos.
+    S.players = (d.players || []).map(p => ({ id: p.id, name: p.name, avatar: p.avatar }));
+    const preds = {};
+    (d.players || []).forEach(p => { preds[p.id] = p.predictions || {}; });
+    // On préserve les brouillons non enregistrés du joueur de cet appareil
+    // (les pronos verrouillés côté serveur restent définitifs).
+    const meId = S.currentPlayerId;
+    if (meId && S.predictions[meId]) {
+      const serverMine = preds[meId] || {};
+      const localMine = S.predictions[meId];
+      const merged = { ...serverMine };
+      for (const mid in localMine) {
+        if (!serverMine[mid] || !serverMine[mid].locked) merged[mid] = localMine[mid];
+      }
+      preds[meId] = merged;
+    }
+    S.predictions = preds;
+    // Si le joueur de cet appareil n'existe plus côté serveur, on le désélectionne.
+    if (S.currentPlayerId && !S.players.some(p => p.id === S.currentPlayerId)) S.currentPlayerId = null;
+    save();
+    SYNCED_ONCE = true;
+    updateNetBadge();
+    if (!silent || wasOffline) render();
+    else refreshLiveViews();
+  } catch (e) { ONLINE = false; updateNetBadge(); }
+}
+
+async function pushPlayer(pid) {
+  if (!ONLINE) return;
+  const p = S.players.find(x => x.id === pid); if (!p) return;
+  await post({ action: "player", player: { id: p.id, name: p.name, avatar: p.avatar, predictions: S.predictions[pid] || {} } });
+}
+async function pushConfig() {
+  if (!ONLINE) return;
+  await post({ action: "config", config: { matches: S.matches, settings: S.settings } });
+}
+async function pushDeletePlayer(id) { if (ONLINE) await post({ action: "deletePlayer", id }); }
+async function pushReset() { if (ONLINE) await post({ action: "reset" }); }
+
+// Rafraîchit les vues "temps réel" (classement/podium) sans casser une saisie en cours.
+function refreshLiveViews() {
+  if (activeTab === "ranking" || activeTab === "podium") render();
+}
+
+function updateNetBadge() {
+  const el = document.getElementById("netBadge");
+  if (!el) return;
+  if (ONLINE) { el.textContent = "🟢 En ligne · partagé"; el.className = "net-badge on"; }
+  else { el.textContent = "🟡 Local (cet appareil)"; el.className = "net-badge off"; }
+}
+
 /* ---------- Helpers ---------- */
 const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
@@ -498,7 +576,7 @@ function wire() {
     const lignes = toLock.map(m => `• ${m.a.name} ${preds[m.id].a}–${preds[m.id].b} ${m.b.name}`).join("\n");
     if (!confirm(`⚠️ ATTENTION : une fois enregistrés, ces ${toLock.length} prono(s) seront DÉFINITIFS et ne pourront PLUS être modifiés :\n\n${lignes}\n\nConfirmer l'enregistrement ?`)) return;
     toLock.forEach(m => { S.predictions[p.id][m.id].locked = true; });
-    save(); toast("🔒 Pronos enregistrés et verrouillés !"); render();
+    save(); pushPlayer(p.id); toast("🔒 Pronos enregistrés et verrouillés !"); render();
   });
 
   const pinBtn = $("#pinBtn");
@@ -539,10 +617,10 @@ window.saveResult = mid => {
   if (a === "" || b === "") { toast("Entre les 2 scores"); return; }
   const m = S.matches.find(x => x.id === mid);
   m.result = { a: +a, b: +b };
-  save(); toast("✅ Résultat enregistré — classement mis à jour"); render();
+  save(); pushConfig(); toast("✅ Résultat enregistré — classement mis à jour"); render();
 };
 window.clearResult = mid => {
-  const m = S.matches.find(x => x.id === mid); m.result = null; save(); render();
+  const m = S.matches.find(x => x.id === mid); m.result = null; save(); pushConfig(); render();
 };
 
 window.saveMatch = mid => {
@@ -553,18 +631,18 @@ window.saveMatch = mid => {
   m.a = { name: g("aname") || "Équipe A", flag: g("aflag") || "🏳️" };
   m.b = { name: g("bname") || "Équipe B", flag: g("bflag") || "🏳️" };
   m.date = g("date") || m.date;
-  save(); toast("💾 Match enregistré"); render();
+  save(); pushConfig(); toast("💾 Match enregistré"); render();
 };
 window.deleteMatch = mid => {
   if (!confirm("Supprimer ce match ?")) return;
   S.matches = S.matches.filter(x => x.id !== mid);
   Object.values(S.predictions).forEach(pp => delete pp[mid]);
-  save(); render();
+  save(); pushConfig(); render();
 };
 window.addMatch = () => {
   S.matches.push({ id: uid(), stage: "Match", a: { name: "Équipe A", flag: "🏳️" }, b: { name: "Équipe B", flag: "🏳️" },
     date: "2026-07-19T21:00", result: null });
-  save(); render();
+  save(); pushConfig(); render();
 };
 
 window.deletePlayer = pid => {
@@ -572,19 +650,19 @@ window.deletePlayer = pid => {
   S.players = S.players.filter(p => p.id !== pid);
   delete S.predictions[pid];
   if (S.currentPlayerId === pid) S.currentPlayerId = null;
-  save(); render();
+  save(); pushDeletePlayer(pid); render();
 };
 
 window.saveScoring = () => {
   S.settings.ptsExact = Math.max(0, +$("#setExact").value || 0);
   S.settings.ptsOutcome = Math.max(0, +$("#setOutcome").value || 0);
-  save(); toast("🎯 Barème enregistré"); render();
+  save(); pushConfig(); toast("🎯 Barème enregistré"); render();
 };
 window.saveSurprises = () => {
   S.settings.surprises = [$("#sur0").value, $("#sur1").value, $("#sur2").value];
-  save(); toast("🎁 Surprises enregistrées");
+  save(); pushConfig(); toast("🎁 Surprises enregistrées");
 };
-window.savePin = () => { S.settings.adminPin = $("#setPin").value.trim() || "1234"; save(); toast("🔐 Code changé"); };
+window.savePin = () => { S.settings.adminPin = $("#setPin").value.trim() || "1234"; save(); pushConfig(); toast("🔐 Code changé"); };
 
 window.exportData = () => {
   const blob = new Blob([JSON.stringify(S, null, 2)], { type: "application/json" });
@@ -605,9 +683,11 @@ window.importData = () => {
   };
   inp.click();
 };
-window.resetAll = () => {
+window.resetAll = async () => {
   if (!confirm("Tout réinitialiser ? (joueurs, pronos, résultats)")) return;
+  await pushReset();
   S = defaultState(); save(); adminUnlocked = false; setTab("matches");
+  if (ONLINE) syncPull();  // ré-initialise la base partagée avec le calendrier
 };
 
 /* ============================================================
@@ -634,7 +714,7 @@ $("#addPlayerBtn").addEventListener("click", () => {
   if (!name) { toast("Entre un pseudo"); return; }
   const p = { id: uid(), name, avatar: pickAvatar };
   S.players.push(p); S.currentPlayerId = p.id; S.predictions[p.id] = {};
-  save(); $("#newPlayerName").value = ""; closeModal(); render(); toast(`Bienvenue ${p.avatar} ${name} !`);
+  save(); pushPlayer(p.id); $("#newPlayerName").value = ""; closeModal(); render(); toast(`Bienvenue ${p.avatar} ${name} !`);
 });
 $("#whoChip").addEventListener("click", openPlayerModal);
 $("#playerModal").addEventListener("click", e => { if (e.target.id === "playerModal") closeModal(); });
@@ -642,8 +722,16 @@ $("#playerModal").addEventListener("click", e => { if (e.target.id === "playerMo
 /* ============================================================
    INIT
    ============================================================ */
-if (!S.currentPlayerId && !S.players.length) {
-  // premier lancement : proposer la création de profil
-  setTimeout(() => openPlayerModal(), 400);
-}
 render();
+
+// Synchronisation en ligne : 1er chargement, puis rafraîchissement régulier.
+(async function initSync() {
+  await syncPull();
+  // Premier lancement : proposer la création de profil si personne n'existe (local + serveur).
+  if (!S.currentPlayerId && !S.players.length) setTimeout(() => openPlayerModal(), 300);
+  updateNetBadge();
+})();
+
+// Rafraîchit le classement avec les pronos des amis toutes les 15 s + au retour sur l'onglet.
+setInterval(() => { if (ONLINE) syncPull(true); }, 15000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && ONLINE) syncPull(true); });
