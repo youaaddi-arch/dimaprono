@@ -15,7 +15,7 @@ function seedMatches() {
   return [
     // Huitièmes de finale encore à jouer (5–7 juillet 2026, heure de Paris)
     { id: uid(), stage: "Huitième de finale", a: { name: "Brésil", flag: "🇧🇷" }, b: { name: "Norvège", flag: "🇳🇴" }, date: "2026-07-05T22:00", result: null },
-    { id: uid(), stage: "Huitième de finale", a: { name: "Mexique", flag: "🇲🇽" }, b: { name: "Angleterre", flag: "🏴" }, date: "2026-07-06T02:00", result: null },
+    { id: uid(), stage: "Huitième de finale", a: { name: "Mexique", flag: "🇲🇽" }, b: { name: "Angleterre", flag: "🏴󠁧󠁢󠁥󠁮󠁧󠁿" }, date: "2026-07-06T02:00", result: null },
     { id: uid(), stage: "Huitième de finale", a: { name: "Portugal", flag: "🇵🇹" }, b: { name: "Espagne", flag: "🇪🇸" }, date: "2026-07-06T21:00", result: null },
     { id: uid(), stage: "Huitième de finale", a: { name: "États-Unis", flag: "🇺🇸" }, b: { name: "Belgique", flag: "🇧🇪" }, date: "2026-07-07T02:00", result: null },
     { id: uid(), stage: "Huitième de finale", a: { name: "Argentine", flag: "🇦🇷" }, b: { name: "Égypte", flag: "🇪🇬" }, date: "2026-07-07T18:00", result: null },
