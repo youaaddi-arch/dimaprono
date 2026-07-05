@@ -15,7 +15,7 @@ function seedMatches() {
   return [
     // Huitièmes de finale encore à jouer (5–7 juillet 2026, heure de Paris)
     { id: uid(), stage: "Huitième de finale", a: { name: "Brésil", flag: "🇧🇷" }, b: { name: "Norvège", flag: "🇳🇴" }, date: "2026-07-05T22:00", result: null },
-    { id: uid(), stage: "Huitième de finale", a: { name: "Mexique", flag: "🇲🇽" }, b: { name: "Angleterre", flag: "🏴" }, date: "2026-07-06T02:00", result: null },
+    { id: uid(), stage: "Huitième de finale", a: { name: "Mexique", flag: "🇲🇽" }, b: { name: "Angleterre", flag: "🏴󠁧󠁢󠁥󠁮󠁧󠁿" }, date: "2026-07-06T02:00", result: null },
     { id: uid(), stage: "Huitième de finale", a: { name: "Portugal", flag: "🇵🇹" }, b: { name: "Espagne", flag: "🇪🇸" }, date: "2026-07-06T21:00", result: null },
     { id: uid(), stage: "Huitième de finale", a: { name: "États-Unis", flag: "🇺🇸" }, b: { name: "Belgique", flag: "🇧🇪" }, date: "2026-07-07T02:00", result: null },
     { id: uid(), stage: "Huitième de finale", a: { name: "Argentine", flag: "🇦🇷" }, b: { name: "Égypte", flag: "🇪🇬" }, date: "2026-07-07T18:00", result: null },
@@ -111,6 +111,7 @@ async function syncPull(silent) {
     // Les pronos du joueur de cet appareil restent en local (privés).
     // Si le joueur de cet appareil n'existe plus côté serveur, on le déconnecte.
     if (S.currentPlayerId && !S.players.some(p => p.id === S.currentPlayerId)) { S.currentPlayerId = null; S.currentPin = null; }
+    detectGoals();  // alerte "⚽ BUT !" si un score a changé
     save();
     SYNCED_ONCE = true;
     updateNetBadge();
@@ -140,7 +141,37 @@ async function pushReset() { if (ONLINE) await post({ action: "reset" }); }
 
 // Rafraîchit les vues "temps réel" (classement/podium) sans casser une saisie en cours.
 function refreshLiveViews() {
-  if (activeTab === "ranking" || activeTab === "podium") render();
+  if (activeTab === "ranking" || activeTab === "podium" || activeTab === "matches") render();
+}
+
+/* ---------- Détection des buts (alerte en direct) ---------- */
+let lastResults = null;
+function detectGoals() {
+  const cur = {};
+  S.matches.forEach(m => { cur[m.id] = m.result ? (m.result.a + "-" + m.result.b) : null; });
+  if (lastResults === null) { lastResults = cur; return; }   // 1er passage : pas d'alerte
+  for (const m of S.matches) {
+    const before = lastResults[m.id], after = cur[m.id];
+    if (after && after !== before) {
+      let isGoal = true;
+      if (before) {
+        const [oa, ob] = before.split("-").map(Number);
+        const [na, nb] = after.split("-").map(Number);
+        isGoal = (na + nb) > (oa + ob);
+      }
+      if (isGoal) goalBanner(m);
+    }
+  }
+  lastResults = cur;
+}
+function goalBanner(m) {
+  const sc = m.result ? `${m.result.a}–${m.result.b}` : "";
+  const el = document.createElement("div");
+  el.className = "goal-banner";
+  el.innerHTML = `<div class="gb-in">⚽ BUT !<span>${m.a.flag} ${esc(m.a.name)} <b>${sc}</b> ${esc(m.b.name)} ${m.b.flag}</span></div>`;
+  document.body.appendChild(el);
+  try { if (navigator.vibrate) navigator.vibrate([180, 90, 180]); } catch (e) {}
+  setTimeout(() => { el.classList.add("out"); setTimeout(() => el.remove(), 400); }, 4200);
 }
 
 function updateNetBadge() {
@@ -294,7 +325,7 @@ function viewMatches() {
     html += `<div class="match" data-mid="${m.id}">
       <div class="match-top">
         <span class="stage-badge">${esc(m.stage)}</span>
-        <span class="match-date">${fmtDate(m.date)}${m.venue ? " · 📍" + esc(m.venue) : ""}</span>
+        ${m.live ? `<span class="live-badge">EN DIRECT</span>` : `<span class="match-date">${fmtDate(m.date)}${m.venue ? " · 📍" + esc(m.venue) : ""}</span>`}
       </div>
       <div class="teams">
         <div class="team"><span class="flag">${m.a.flag}</span><span class="tname">${esc(m.a.name)}</span></div>
@@ -307,7 +338,8 @@ function viewMatches() {
       </div>
       <div class="match-foot">
         <div>
-          ${res ? `<span class="result-line">Résultat : <span class="r">${res.a}–${res.b}</span></span>` :
+          ${m.live && res ? `<span class="live-line">🔴 EN DIRECT · <span class="r">${res.a}–${res.b}</span></span>` :
+      res ? `<span class="result-line">Résultat : <span class="r">${res.a}–${res.b}</span></span>` :
       committed ? `<span class="locked-badge">🔒 Prono validé : <b>${pr.a}–${pr.b}</b> · définitif</span>` :
       locked ? `<span class="locked-badge">🔒 Match commencé — prono impossible</span>` :
         (pr.a != null && pr.b != null) ? `<span class="saved-tag show">✏️ Brouillon — pas encore validé</span>` : ""}
