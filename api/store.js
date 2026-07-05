@@ -26,6 +26,10 @@ const KV_TOKEN =
 const K_PIDS = "dimaprono:pids";
 const K_PLAYER = (id) => "dimaprono:player:" + id;
 const K_CONFIG = "dimaprono:config";
+const K_LIVETS = "dimaprono:live:ts";
+
+// Clé (gratuite) football-data.org pour les scores en direct — optionnelle.
+const FD_TOKEN = process.env.FOOTBALL_DATA_TOKEN || "";
 
 function kvConfigured() { return Boolean(KV_URL && KV_TOKEN); }
 
@@ -93,11 +97,90 @@ function publicConfig(config) {
   return { matches: config.matches || [], settings: config.settings || {} };
 }
 
+/* ---------- Scores en direct (football-data.org) ---------- */
+// Correspondance des noms d'équipes (FR de l'appli <-> EN de l'API).
+const TEAM_ALIASES = {
+  france: "FRA", maroc: "MAR", morocco: "MAR",
+  bresil: "BRA", brazil: "BRA", norvege: "NOR", norway: "NOR",
+  mexique: "MEX", mexico: "MEX", angleterre: "ENG", england: "ENG",
+  portugal: "POR", espagne: "ESP", spain: "ESP",
+  "etats unis": "USA", usa: "USA", "united states": "USA", "united states of america": "USA",
+  belgique: "BEL", belgium: "BEL", argentine: "ARG", argentina: "ARG",
+  egypte: "EGY", egypt: "EGY", suisse: "SUI", switzerland: "SUI",
+  colombie: "COL", colombia: "COL",
+  allemagne: "GER", germany: "GER", "pays bas": "NED", netherlands: "NED",
+  italie: "ITA", italy: "ITA", croatie: "CRO", croatia: "CRO",
+  senegal: "SEN", "coree du sud": "KOR", "south korea": "KOR", "korea republic": "KOR",
+  japon: "JPN", japan: "JPN", uruguay: "URU", "etats-unis": "USA",
+  canada: "CAN", danemark: "DEN", denmark: "DEN", serbie: "SRB", serbia: "SRB",
+  ghana: "GHA", "pays-bas": "NED",
+};
+function normalizeName(s) {
+  return String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim();
+}
+function teamKey(name) {
+  const n = normalizeName(name);
+  if (TEAM_ALIASES[n]) return TEAM_ALIASES[n];
+  // essaie aussi le 1er mot (ex: "coree" )
+  const first = n.split(" ")[0];
+  return TEAM_ALIASES[first] || null;
+}
+
+// Met à jour les scores en direct depuis football-data.org (throttle 30 s, partagé via KV).
+async function maybeRefreshLive() {
+  if (!FD_TOKEN) return;
+  const tsRaw = await redis(["GET", K_LIVETS]);
+  const now = Date.now();
+  if (tsRaw && now - (+tsRaw) < 30000) return;   // throttle global
+  await redis(["SET", K_LIVETS, String(now)]);
+  const config = await getConfig();
+  if (!config || !Array.isArray(config.matches)) return;
+
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), 5000);
+  let data;
+  try {
+    const r = await fetch("https://api.football-data.org/v4/competitions/WC/matches", {
+      headers: { "X-Auth-Token": FD_TOKEN }, signal: ctrl.signal,
+    });
+    if (!r.ok) return;
+    data = await r.json();
+  } catch (e) { return; } finally { clearTimeout(to); }
+
+  const apiMatches = (data && data.matches) || [];
+  let changed = false;
+  for (const m of config.matches) {
+    const kA = teamKey(m.a.name), kB = teamKey(m.b.name);
+    if (!kA || !kB) continue; // équipe non déterminée -> on saute
+    const am = apiMatches.find((x) => {
+      const h = teamKey(x.homeTeam && x.homeTeam.name), a = teamKey(x.awayTeam && x.awayTeam.name);
+      return (h === kA && a === kB) || (h === kB && a === kA);
+    });
+    if (!am) continue;
+    const st = am.status;
+    if (st === "IN_PLAY" || st === "PAUSED" || st === "FINISHED") {
+      const ft = (am.score && am.score.fullTime) || {};
+      const sh = ft.home == null ? 0 : ft.home, sa = ft.away == null ? 0 : ft.away;
+      const homeK = teamKey(am.homeTeam && am.homeTeam.name);
+      const aScore = homeK === kA ? sh : sa;
+      const bScore = homeK === kA ? sa : sh;
+      const live = st !== "FINISHED";
+      if (!m.result || m.result.a !== aScore || m.result.b !== bScore || m.live !== live) {
+        m.result = { a: aScore, b: bScore };
+        m.live = live;
+        changed = true;
+      }
+    }
+  }
+  if (changed) await redis(["SET", K_CONFIG, JSON.stringify(config)]);
+}
+
 module.exports = async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   if (!kvConfigured()) { res.status(200).json({ online: false }); return; }
   try {
     if (req.method === "GET") {
+      try { await maybeRefreshLive(); } catch (e) { /* jamais bloquant */ }
       const [players, config] = [await allPlayers(), await getConfig()];
       res.status(200).json({ online: true, config: publicConfig(config), ranking: buildRanking(players, config) });
       return;
