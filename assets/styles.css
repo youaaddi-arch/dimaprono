@@ -60,17 +60,17 @@ body {
 
 /* Tabs */
 .tabs {
-  display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px;
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
   background: var(--card); border: 1px solid var(--stroke); padding: 6px;
   border-radius: 16px; position: sticky; top: 58px; z-index: 19; backdrop-filter: blur(10px);
 }
 .tab {
   display: flex; flex-direction: column; align-items: center; gap: 2px;
   border: 0; background: transparent; color: var(--muted); font-weight: 700;
-  font-size: 10.5px; padding: 9px 2px; border-radius: 12px; cursor: pointer; transition: .18s;
+  font-size: 12px; padding: 9px 4px; border-radius: 12px; cursor: pointer; transition: .18s;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
 }
-.tab span { font-size: 18px; }
+.tab span { font-size: 19px; }
 .tab.is-active { background: linear-gradient(180deg, rgba(240,192,64,.24), rgba(216,165,32,.12)); color: var(--text); box-shadow: inset 0 0 0 1px rgba(240,192,64,.4); }
 
 .net-badge { text-align: center; font-size: 11px; font-weight: 700; margin: 8px 2px 0; padding: 4px 0;
