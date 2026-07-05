@@ -28,6 +28,23 @@ Ouvre simplement `index.html` dans un navigateur — aucune installation.
 3. L'organisateur saisit les **résultats** au fur et à mesure (onglet ⚙️ Orga, code par défaut : `1234`).
 4. Le **classement** se met à jour tout seul et le **podium** révèle les gagnants 🎉
 
+## 🌐 Mode en ligne partagé (chacun son téléphone)
+
+Par défaut l'appli marche en **local** (données sur l'appareil). Pour que **chaque
+ami joue depuis son propre téléphone avec un classement commun en direct**, il suffit
+de brancher une base **Vercel KV / Upstash Redis** au projet Vercel :
+
+1. Sur Vercel → projet `dimaprono` → onglet **Storage** → **Create Database** →
+   **KV (Upstash Redis)** → **Connect** au projet.
+2. Vercel injecte automatiquement les variables (`KV_REST_API_URL`, `KV_REST_API_TOKEN`).
+   **Redeploy** le projet.
+
+L'appli détecte la base toute seule : le badge passe de **🟡 Local** à **🟢 En ligne · partagé**,
+et tous les pronos/résultats sont synchronisés entre les téléphones (rafraîchissement auto).
+Sans base configurée, l'appli continue de fonctionner en local, rien ne casse.
+
+La logique serveur est dans `api/store.js` (fonction serverless Vercel).
+
 ## 🎨 Personnalisation
 
 - Le logo s'affiche automatiquement si tu déposes ton image dans `assets/logo.png`
