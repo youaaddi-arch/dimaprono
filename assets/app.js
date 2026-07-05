@@ -44,8 +44,8 @@ function defaultState() {
       ptsOutcome: 1,
       adminPin: "1234",
       surprises: [
-        "🥇 1er : le trophée + les autres paient le resto 🍽️",
-        "🥈 2e : une boisson offerte par les perdants 🥤",
+        "🥇 1er : un resto offert par Yousra ! 🍽️🎉",
+        "🥈 2e : une boisson offerte 🥤",
         "🥉 3e : l'honneur… et un petit dessert 🍰",
       ],
     },
@@ -382,7 +382,7 @@ function viewRanking() {
         <div class="rank-pts"><b>${r.pts}</b><small>PTS</small></div>
       </div>`;
   });
-  html += `</div><p class="hint" style="margin-top:14px">🔒 Les pronos de chacun restent <b>privés</b> : on ne voit que les points.</p>`;
+  html += `</div><p class="hint" style="margin-top:14px">🔒 Les pronos restent <b>privés</b> (on ne voit que les points).<br>⚖️ En cas d'<b>égalité de points</b>, c'est le <b>premier à avoir validé</b> qui gagne.</p>`;
 
   html += `</div>`;
   return html;
