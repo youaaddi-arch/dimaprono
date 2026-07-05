@@ -84,6 +84,7 @@ let ONLINE = false;          // true si la base partagée répond
 let SYNCED_ONCE = false;
 let SERVER_RANKING = null;   // classement calculé par le serveur (mode en ligne)
 let REVEAL = null;           // cache des pronos révélés (matchs où j'ai le droit de voir)
+let CHEERS = 0;              // nombre de félicitations pour le/la 1er·e (partagé)
 
 function post(payload) {
   return fetch(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
@@ -106,6 +107,7 @@ async function syncPull(silent) {
     }
     // Le serveur renvoie UNIQUEMENT le classement (points), jamais les pronos des autres.
     SERVER_RANKING = d.ranking || [];
+    CHEERS = d.cheers || 0;
     REVEAL = null;  // on rechargera les pronos révélés à la demande (données à jour)
     S.players = SERVER_RANKING.map(r => ({ id: r.id, name: r.name, avatar: r.avatar }));
     // Les pronos du joueur de cet appareil restent en local (privés).
@@ -457,10 +459,11 @@ function viewRanking() {
     const pos = i + 1;
     const medal = pos === 1 ? "🥇" : pos === 2 ? "🥈" : pos === 3 ? "🥉" : pos;
     const me = r.player.id === S.currentPlayerId;
-    html += `<div class="rank-row rank-${pos} ${me ? "me" : ""}">
+    const leader = pos === 1 && r.pts > 0;   // 1er avec des points -> mis en avant
+    html += `<div class="rank-row rank-${pos} ${me ? "me" : ""} ${leader ? "leader" : ""}">
         <div class="rank-pos">${medal}</div>
         <div class="rank-id"><span class="av">${r.player.avatar}</span>
-          <div><div class="nm">${esc(r.player.name)}${me ? " (toi)" : ""}</div>
+          <div><div class="nm">${esc(r.player.name)}${leader ? ` <span class="lead-badge">👑 EN TÊTE</span>` : ""}${me ? " (toi)" : ""}</div>
           <div class="sub">📝 ${r.filled || 0} prono${(r.filled || 0) > 1 ? "s" : ""} · 🎯 ${r.exact} exact${r.exact > 1 ? "s" : ""} · ✅ ${r.good} bon${r.good > 1 ? "s" : ""}</div></div>
         </div>
         <div class="rank-pts"><b>${r.pts}</b><small>PTS</small></div>
@@ -497,7 +500,17 @@ function viewPodium() {
   });
   html += `</div>`;
 
-  html += `<button class="btn btn-primary" onclick="confetti();playWin();toast('🎉 Bravo au podium !')">🎉 Lancer la fête</button>`;
+  // Mise en évidence + félicitations du/de la 1er·e
+  const leader = top3[0];
+  if (leader) {
+    html += `<div class="winner-card">
+      <div class="winner-head">👑 En tête : <b>${esc(leader.player.name)} ${leader.player.avatar}</b> · ${leader.pts} pts</div>
+      <button class="btn btn-primary btn-block" onclick="cheerWinner('${esc(leader.player.name)}')">🎉 Féliciter ${esc(leader.player.name)} 👏</button>
+      <div class="cheer-line">👏 <b id="cheerCount">${CHEERS}</b> félicitation${CHEERS > 1 ? "s" : ""}</div>
+    </div>`;
+  }
+
+  html += `<button class="btn btn-ghost" style="margin-top:10px" onclick="confetti();playWin();toast('🎉 Bravo au podium !')">🎉 Lancer la fête</button>`;
 
   html += `<div class="surprise-card">
     <h3>🎁 Les surprises pour les 3 premiers</h3>
@@ -673,6 +686,26 @@ function wire() {
 window.setAdminSub = s => { adminSub = s; render(); };
 window.confetti = confetti;
 window.playWin = playWin;
+
+// Grande célébration du/de la gagnant·e
+function celebrate(name) {
+  confetti(); playWin();
+  const el = document.createElement("div");
+  el.className = "goal-banner celebrate";
+  el.innerHTML = `<div class="gb-in">🎉 BRAVO ${esc(name)} 👑<span>Champion·ne des pronos !</span></div>`;
+  document.body.appendChild(el);
+  try { if (navigator.vibrate) navigator.vibrate([120, 60, 120, 60, 240]); } catch (e) {}
+  setTimeout(() => { el.classList.add("out"); setTimeout(() => el.remove(), 400); }, 4200);
+}
+window.celebrate = celebrate;
+window.cheerWinner = async (name) => {
+  celebrate(name);
+  if (ONLINE) {
+    const r = await post({ action: "cheer" });
+    if (r && typeof r.cheers === "number") CHEERS = r.cheers;
+  } else CHEERS++;
+  const el = document.getElementById("cheerCount"); if (el) el.textContent = CHEERS;
+};
 
 // Voir les pronos des autres pour un match (autorisé une fois le sien validé / match commencé).
 window.showPronos = async (mid) => {
