@@ -27,6 +27,7 @@ const K_PIDS = "dimaprono:pids";
 const K_PLAYER = (id) => "dimaprono:player:" + id;
 const K_CONFIG = "dimaprono:config";
 const K_LIVETS = "dimaprono:live:ts";
+const K_CHEERS = "dimaprono:cheers";
 
 // Clé (gratuite) football-data.org pour les scores en direct — optionnelle.
 const FD_TOKEN = process.env.FOOTBALL_DATA_TOKEN || "";
@@ -199,8 +200,8 @@ module.exports = async (req, res) => {
   try {
     if (req.method === "GET") {
       try { await maybeRefreshLive(); } catch (e) { /* jamais bloquant */ }
-      const [players, config] = [await allPlayers(), await getConfig()];
-      res.status(200).json({ online: true, config: publicConfig(config), ranking: buildRanking(players, config) });
+      const [players, config, cheersRaw] = [await allPlayers(), await getConfig(), await redis(["GET", K_CHEERS])];
+      res.status(200).json({ online: true, config: publicConfig(config), ranking: buildRanking(players, config), cheers: +(cheersRaw || 0) });
       return;
     }
     if (req.method === "POST") {
@@ -299,9 +300,14 @@ module.exports = async (req, res) => {
         res.status(200).json({ ok: true });
         return;
       }
+      if (action === "cheer") {
+        const c = await redis(["INCR", K_CHEERS]);
+        res.status(200).json({ ok: true, cheers: +c });
+        return;
+      }
       if (action === "reset") {
         const ids = (await redis(["SMEMBERS", K_PIDS])) || [];
-        const cmds = [["DEL", K_CONFIG], ["DEL", K_PIDS]];
+        const cmds = [["DEL", K_CONFIG], ["DEL", K_PIDS], ["DEL", K_CHEERS]];
         ids.forEach((id) => cmds.push(["DEL", K_PLAYER(id)]));
         await pipeline(cmds);
         res.status(200).json({ ok: true });
