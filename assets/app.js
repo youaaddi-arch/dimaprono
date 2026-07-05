@@ -111,7 +111,7 @@ async function syncPull(silent) {
     // Les pronos du joueur de cet appareil restent en local (privés).
     // Si le joueur de cet appareil n'existe plus côté serveur, on le déconnecte.
     if (S.currentPlayerId && !S.players.some(p => p.id === S.currentPlayerId)) { S.currentPlayerId = null; S.currentPin = null; }
-    detectGoals();  // alerte "⚽ BUT !" si un score a changé
+    detectMatchEvents();  // alertes "⚽ BUT !" / "🏁 Terminé" si un score a changé
     save();
     SYNCED_ONCE = true;
     updateNetBadge();
@@ -144,35 +144,106 @@ function refreshLiveViews() {
   if (activeTab === "ranking" || activeTab === "podium" || activeTab === "matches") render();
 }
 
-/* ---------- Détection des buts (alerte en direct) ---------- */
-let lastResults = null;
-function detectGoals() {
-  const cur = {};
-  S.matches.forEach(m => { cur[m.id] = m.result ? (m.result.a + "-" + m.result.b) : null; });
-  if (lastResults === null) { lastResults = cur; return; }   // 1er passage : pas d'alerte
+/* ============================================================
+   SONS (synthétisés via Web Audio — aucun fichier externe)
+   ============================================================ */
+let audioCtx = null;
+let MUTED = localStorage.getItem("dimaprono_muted") === "1";
+function unlockAudio() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+  } catch (e) {}
+}
+function tone(freq, start, dur, type = "sine", vol = 0.25) {
+  if (!audioCtx) return;
+  const t0 = audioCtx.currentTime + start;
+  const osc = audioCtx.createOscillator(), g = audioCtx.createGain();
+  osc.type = type; osc.frequency.value = freq;
+  g.gain.setValueAtTime(0, t0);
+  g.gain.linearRampToValueAtTime(vol, t0 + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0008, t0 + dur);
+  osc.connect(g); g.connect(audioCtx.destination);
+  osc.start(t0); osc.stop(t0 + dur + 0.02);
+}
+function playGoal() {   // jingle montant joyeux
+  if (MUTED) return; unlockAudio();
+  [523, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.09, 0.18, "triangle", 0.3));
+  tone(1319, 0.42, 0.35, "triangle", 0.28);
+}
+function playWhistle() { // coup de sifflet (fin de match) : 2 coups
+  if (MUTED) return; unlockAudio();
+  tone(2100, 0, 0.16, "square", 0.18); tone(2100, 0.22, 0.28, "square", 0.18);
+}
+function playWin() {    // fanfare de victoire
+  if (MUTED) return; unlockAudio();
+  [[392, 0], [523, 0.14], [659, 0.28], [784, 0.42], [1047, 0.6]].forEach(([f, t]) => tone(f, t, 0.3, "triangle", 0.3));
+  tone(784, 0.9, 0.5, "triangle", 0.25); tone(1047, 0.9, 0.5, "sine", 0.2);
+}
+window.toggleMute = () => {
+  MUTED = !MUTED; localStorage.setItem("dimaprono_muted", MUTED ? "1" : "0");
+  const b = document.getElementById("muteBtn"); if (b) b.textContent = MUTED ? "🔇" : "🔊";
+  if (!MUTED) { unlockAudio(); toast("🔊 Sons activés"); } else toast("🔇 Sons coupés");
+};
+
+/* ============================================================
+   ÉVÉNEMENTS DE MATCH (but / fin) + visuels
+   ============================================================ */
+let prevSnap = null;
+function detectMatchEvents() {
+  const snap = {};
+  S.matches.forEach(m => { snap[m.id] = { s: m.result ? (m.result.a + "-" + m.result.b) : null, live: !!m.live }; });
+  if (prevSnap === null) { prevSnap = snap; return; }   // 1er passage : pas d'alerte
   for (const m of S.matches) {
-    const before = lastResults[m.id], after = cur[m.id];
-    if (after && after !== before) {
-      let isGoal = true;
-      if (before) {
-        const [oa, ob] = before.split("-").map(Number);
-        const [na, nb] = after.split("-").map(Number);
-        isGoal = (na + nb) > (oa + ob);
-      }
-      if (isGoal) goalBanner(m);
+    const b = prevSnap[m.id], a = snap[m.id];
+    if (!a) continue;
+    if (a.live && a.s && a.s !== (b && b.s)) {            // BUT en direct
+      let up = true;
+      if (b && b.s) { const [oa, ob] = b.s.split("-").map(Number), [na, nb] = a.s.split("-").map(Number); up = (na + nb) > (oa + ob); }
+      if (up) goalEvent(m);
     }
+    if (b && b.live && !a.live && a.s) finishedEvent(m);  // FIN DU MATCH
   }
-  lastResults = cur;
+  prevSnap = snap;
 }
-function goalBanner(m) {
-  const sc = m.result ? `${m.result.a}–${m.result.b}` : "";
+function eventBanner(cls, emoji, title, sub) {
   const el = document.createElement("div");
-  el.className = "goal-banner";
-  el.innerHTML = `<div class="gb-in">⚽ BUT !<span>${m.a.flag} ${esc(m.a.name)} <b>${sc}</b> ${esc(m.b.name)} ${m.b.flag}</span></div>`;
+  el.className = "goal-banner " + cls;
+  el.innerHTML = `<div class="gb-in">${emoji} ${title}<span>${sub}</span></div>`;
   document.body.appendChild(el);
-  try { if (navigator.vibrate) navigator.vibrate([180, 90, 180]); } catch (e) {}
   setTimeout(() => { el.classList.add("out"); setTimeout(() => el.remove(), 400); }, 4200);
+  return el;
 }
+function notify(title, body) {
+  try {
+    if ("Notification" in window && Notification.permission === "granted" && document.hidden) {
+      new Notification(title, { body, icon: "assets/logo.png", badge: "assets/logo.png", vibrate: [180, 90, 180] });
+    }
+  } catch (e) {}
+}
+function goalEvent(m) {
+  const sc = m.result ? `${m.result.a}–${m.result.b}` : "";
+  eventBanner("", "⚽ BUT !", "", `${m.a.flag} ${esc(m.a.name)} <b>${sc}</b> ${esc(m.b.name)} ${m.b.flag}`);
+  try { if (navigator.vibrate) navigator.vibrate([180, 90, 180]); } catch (e) {}
+  confetti(); playGoal();
+  notify("⚽ BUT !", `${m.a.name} ${sc} ${m.b.name}`);
+}
+function finishedEvent(m) {
+  const sc = m.result ? `${m.result.a}–${m.result.b}` : "";
+  eventBanner("gb-end", "🏁 MATCH TERMINÉ", "", `${m.a.flag} ${esc(m.a.name)} <b>${sc}</b> ${esc(m.b.name)} ${m.b.flag}`);
+  try { if (navigator.vibrate) navigator.vibrate([90, 60, 90, 60, 200]); } catch (e) {}
+  playWhistle();
+  notify("🏁 Match terminé", `${m.a.name} ${sc} ${m.b.name}`);
+}
+// Déverrouille l'audio + demande les notifications au 1er contact utilisateur.
+let interacted = false;
+function onFirstInteraction() {
+  if (interacted) return; interacted = true;
+  unlockAudio();
+  try { if ("Notification" in window && Notification.permission === "default") Notification.requestPermission(); } catch (e) {}
+}
+document.addEventListener("click", onFirstInteraction, { once: true });
+document.addEventListener("touchstart", onFirstInteraction, { once: true });
 
 function updateNetBadge() {
   const el = document.getElementById("netBadge");
@@ -268,6 +339,10 @@ function setTab(tab) {
   activeTab = tab;
   $$(".tab").forEach(b => b.classList.toggle("is-active", b.dataset.tab === tab));
   render();
+  // Fête sur le podium (si des résultats existent) : confettis + fanfare
+  if (tab === "podium" && S.players.length && S.matches.some(m => m.result)) {
+    confetti(); playWin();
+  }
 }
 $("#tabs").addEventListener("click", e => {
   const btn = e.target.closest(".tab"); if (btn) setTab(btn.dataset.tab);
@@ -413,7 +488,7 @@ function viewPodium() {
   });
   html += `</div>`;
 
-  html += `<button class="btn btn-primary" onclick="confetti();toast('🎉 Bravo au podium !')">🎉 Lancer les confettis</button>`;
+  html += `<button class="btn btn-primary" onclick="confetti();playWin();toast('🎉 Bravo au podium !')">🎉 Lancer la fête</button>`;
 
   html += `<div class="surprise-card">
     <h3>🎁 Les surprises pour les 3 premiers</h3>
@@ -588,6 +663,7 @@ function wire() {
    ============================================================ */
 window.setAdminSub = s => { adminSub = s; render(); };
 window.confetti = confetti;
+window.playWin = playWin;
 
 // Voir les pronos des autres pour un match (autorisé une fois le sien validé / match commencé).
 window.showPronos = async (mid) => {
@@ -805,6 +881,7 @@ $("#playerModal").addEventListener("click", e => { if (e.target.id === "playerMo
    INIT
    ============================================================ */
 render();
+{ const mb = document.getElementById("muteBtn"); if (mb) mb.textContent = MUTED ? "🔇" : "🔊"; }
 
 // Synchronisation en ligne : 1er chargement, puis rafraîchissement régulier.
 (async function initSync() {
