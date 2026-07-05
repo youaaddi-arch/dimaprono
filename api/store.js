@@ -72,17 +72,18 @@ function buildRanking(players, config) {
   const s = (config && config.settings) || { ptsExact: 3, ptsOutcome: 1 };
   const matches = (config && config.matches) || [];
   return players.map((p) => {
-    let pts = 0, exact = 0, good = 0, played = 0;
+    let pts = 0, exact = 0, good = 0, played = 0, filled = 0;
     const preds = p.predictions || {};
     for (const m of matches) {
-      if (!m.result) continue;
       const pr = preds[m.id];
+      if (pr && pr.a != null) filled++;            // participation (tous matchs)
+      if (!m.result) continue;
       if (pr && pr.a != null) played++;
       const r = pointsFor(pr, m.result, s);
       pts += r.pts;
       if (r.kind === "exact") exact++; else if (r.kind === "outcome") good++;
     }
-    return { id: p.id, name: p.name, avatar: p.avatar, pts, exact, good, played };
+    return { id: p.id, name: p.name, avatar: p.avatar, pts, exact, good, played, filled };
   }).sort((x, y) => y.pts - x.pts || y.exact - x.exact || y.good - x.good || String(x.name).localeCompare(String(y.name)));
 }
 
@@ -122,6 +123,31 @@ module.exports = async (req, res) => {
         if (!doc) { res.status(200).json({ ok: false, error: "notfound" }); return; }
         if (String(doc.pin || "") !== String(body.pin || "")) { res.status(200).json({ ok: false, error: "badpin" }); return; }
         res.status(200).json({ ok: true, player: { id: doc.id, name: doc.name, avatar: doc.avatar, predictions: doc.predictions || {} } });
+        return;
+      }
+
+      // Révéler les pronos des autres — UNIQUEMENT pour les matchs où le
+      // demandeur a déjà validé le sien (ou match commencé/terminé). Anti-triche.
+      if (action === "reveal" && body.id) {
+        const me = await getPlayer(body.id);
+        if (!me) { res.status(200).json({ ok: false, error: "notfound" }); return; }
+        if (String(me.pin || "") !== String(body.pin || "")) { res.status(200).json({ ok: false, error: "badpin" }); return; }
+        const config = await getConfig();
+        const matches = (config && config.matches) || [];
+        const players = await allPlayers();
+        const now = Date.now();
+        const reveal = {};
+        for (const m of matches) {
+          const started = m.date && Date.parse(m.date) <= now;
+          const myPr = (me.predictions || {})[m.id];
+          const iLocked = myPr && myPr.a != null && myPr.locked === true;
+          if (!(started || iLocked || m.result)) continue;
+          reveal[m.id] = players.map((p) => {
+            const pr = (p.predictions || {})[m.id];
+            return (pr && pr.a != null) ? { name: p.name, avatar: p.avatar, a: pr.a, b: pr.b } : null;
+          }).filter(Boolean);
+        }
+        res.status(200).json({ ok: true, reveal });
         return;
       }
 
