@@ -286,7 +286,7 @@ function pointsFor(pred, result) {
   return { pts: 0, kind: "miss" };
 }
 function playerScore(playerId) {
-  let pts = 0, exact = 0, good = 0, played = 0, filled = 0;
+  let pts = 0, exact = 0, good = 0, played = 0, filled = 0, closeness = 0;
   const preds = S.predictions[playerId] || {};
   for (const m of S.matches) {
     const pr = preds[m.id];
@@ -297,18 +297,20 @@ function playerScore(playerId) {
     pts += r.pts;
     if (r.kind === "exact") exact++;
     else if (r.kind === "outcome") good++;
+    if (pr && pr.a != null && pr.b != null) closeness += Math.abs(+pr.a - +m.result.a) + Math.abs(+pr.b - +m.result.b);
+    else closeness += 50;
   }
-  return { pts, exact, good, played, filled };
+  return { pts, exact, good, played, filled, closeness };
 }
 function ranking() {
   // En ligne : le serveur calcule les points (sans exposer les pronos des autres).
   if (ONLINE && SERVER_RANKING) {
-    return SERVER_RANKING.map(r => ({ player: { id: r.id, name: r.name, avatar: r.avatar }, pts: r.pts, exact: r.exact, good: r.good, played: r.played, filled: r.filled }));
+    return SERVER_RANKING.map(r => ({ player: { id: r.id, name: r.name, avatar: r.avatar }, pts: r.pts, exact: r.exact, good: r.good, played: r.played, filled: r.filled, closeness: r.closeness }));
   }
   // Hors-ligne : calcul local.
   return S.players
     .map(p => ({ player: p, ...playerScore(p.id) }))
-    .sort((x, y) => y.pts - x.pts || y.exact - x.exact || y.good - x.good || x.player.name.localeCompare(y.player.name));
+    .sort((x, y) => y.pts - x.pts || x.closeness - y.closeness || x.player.name.localeCompare(y.player.name));
 }
 
 /* ---------- Toast + Confetti ---------- */
@@ -457,22 +459,33 @@ function viewRanking() {
     return html + `<div class="empty"><div class="big">🙈</div><p>Aucun joueur pour l'instant.</p></div></div>`;
   }
 
+  // Rangs avec ex æquo : même points ET même proximité au score = même rang.
+  const keyOf = (r) => r.pts + "|" + (r.closeness == null ? -1 : r.closeness);
+  let lastKey = null, lastPos = 0;
+  const rows = rk.map((r, i) => {
+    const pos = (keyOf(r) === lastKey) ? lastPos : i + 1;   // ex æquo -> on garde le rang précédent
+    lastKey = keyOf(r); lastPos = pos;
+    return { r, pos };
+  });
+  const tied = {};   // rang -> nombre de joueurs à ce rang
+  rows.forEach(({ pos }) => { tied[pos] = (tied[pos] || 0) + 1; });
+
   html += `<div class="rank-list">`;
-  rk.forEach((r, i) => {
-    const pos = i + 1;
+  rows.forEach(({ r, pos }) => {
     const medal = pos === 1 ? "🥇" : pos === 2 ? "🥈" : pos === 3 ? "🥉" : pos;
     const me = r.player.id === S.currentPlayerId;
+    const exaequo = tied[pos] > 1;
     const leader = pos === 1 && r.pts > 0;   // 1er avec des points -> mis en avant
-    html += `<div class="rank-row rank-${pos} ${me ? "me" : ""} ${leader ? "leader" : ""}">
+    html += `<div class="rank-row rank-${pos <= 3 ? pos : "x"} ${me ? "me" : ""} ${leader ? "leader" : ""}">
         <div class="rank-pos">${medal}</div>
         <div class="rank-id"><span class="av">${r.player.avatar}</span>
-          <div><div class="nm">${esc(r.player.name)}${leader ? ` <span class="lead-badge">👑 EN TÊTE</span>` : ""}${me ? " (toi)" : ""}</div>
+          <div><div class="nm">${esc(r.player.name)}${leader ? ` <span class="lead-badge">👑 EN TÊTE</span>` : ""}${exaequo ? ` <span class="exaequo">ex æquo</span>` : ""}${me ? " (toi)" : ""}</div>
           <div class="sub">📝 ${r.filled || 0} prono${(r.filled || 0) > 1 ? "s" : ""} · 🎯 ${r.exact} exact${r.exact > 1 ? "s" : ""} · ✅ ${r.good} bon${r.good > 1 ? "s" : ""}</div></div>
         </div>
         <div class="rank-pts"><b>${r.pts}</b><small>PTS</small></div>
       </div>`;
   });
-  html += `</div><p class="hint" style="margin-top:14px">🔒 Les pronos restent <b>privés</b> (on ne voit que les points).<br>⚖️ En cas d'<b>égalité de points</b>, c'est le <b>premier à avoir validé</b> qui gagne.</p>`;
+  html += `</div><p class="hint" style="margin-top:14px">🔒 Les pronos restent <b>privés</b> (on ne voit que les points).<br>⚖️ À points égaux, on départage par la <b>proximité au score réel</b> ; sinon les joueurs sont <b>ex æquo</b>.</p>`;
 
   html += `</div>`;
   return html;

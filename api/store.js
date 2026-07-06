@@ -78,7 +78,7 @@ function buildRanking(players, config) {
   const s = (config && config.settings) || { ptsExact: 3, ptsOutcome: 1 };
   const matches = (config && config.matches) || [];
   return players.map((p) => {
-    let pts = 0, exact = 0, good = 0, played = 0, filled = 0;
+    let pts = 0, exact = 0, good = 0, played = 0, filled = 0, closeness = 0;
     const preds = p.predictions || {};
     for (const m of matches) {
       const pr = preds[m.id];
@@ -88,13 +88,15 @@ function buildRanking(players, config) {
       const r = pointsFor(pr, m.result, s);
       pts += r.pts;
       if (r.kind === "exact") exact++; else if (r.kind === "outcome") good++;
+      // proximité au score réel (plus petit = plus proche) -> départage les égalités
+      if (pr && pr.a != null && pr.b != null) closeness += Math.abs(+pr.a - +m.result.a) + Math.abs(+pr.b - +m.result.b);
+      else closeness += 50; // pas de prono sur un match terminé -> pénalisé
     }
-    return { id: p.id, name: p.name, avatar: p.avatar, pts, exact, good, played, filled, firstAt: p.firstAt || 0 };
+    return { id: p.id, name: p.name, avatar: p.avatar, pts, exact, good, played, filled, closeness };
   }).sort((x, y) =>
     y.pts - x.pts ||
-    x.firstAt - y.firstAt ||          // égalité de points -> le premier à avoir validé gagne
-    y.exact - x.exact || y.good - x.good ||
-    String(x.name).localeCompare(String(y.name))
+    x.closeness - y.closeness ||       // égalité de points -> le plus proche du score gagne
+    String(x.name).localeCompare(String(y.name))  // sinon vrais ex æquo (ordre stable)
   );
 }
 

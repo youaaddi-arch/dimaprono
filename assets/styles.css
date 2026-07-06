@@ -289,6 +289,7 @@ textarea { resize: vertical; min-height: 60px; }
 /* Mise en évidence du/de la 1er·e */
 .rank-row.leader { background: linear-gradient(90deg, rgba(255,213,74,.22), rgba(255,213,74,.05)); box-shadow: inset 0 0 0 1.5px var(--gold); }
 .lead-badge { font-size: 10px; font-weight: 900; color: #241a02; background: var(--gold); padding: 2px 7px; border-radius: 999px; margin-left: 4px; vertical-align: middle; }
+.exaequo { font-size: 10px; font-weight: 800; color: var(--muted); background: rgba(255,255,255,.08); border: 1px solid var(--stroke); padding: 2px 7px; border-radius: 999px; margin-left: 4px; vertical-align: middle; }
 .winner-card { margin-top: 16px; border-radius: var(--radius); border: 1px solid rgba(255,213,74,.4);
   background: radial-gradient(500px 160px at 50% 0%, rgba(255,213,74,.18), transparent), var(--card); padding: 16px; }
 .winner-head { font-size: 15px; margin-bottom: 10px; }
