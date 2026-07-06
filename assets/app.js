@@ -937,11 +937,24 @@ $("#whoChip").addEventListener("click", openPlayerModal);
 $("#playerModal").addEventListener("click", e => { if (e.target.id === "playerModal") closeModal(); });
 
 /* ---------- Écran de fête : Samantha championne 👑 (musique kabyle) ---------- */
-const CELEB_VIDEO = "https://www.youtube.com/embed/Z13CQjLHnvQ?rel=0&autoplay=1&playsinline=1";
+const YT_PARAMS = "?rel=0&autoplay=1&playsinline=1";
+const DEFAULT_YT = "Z13CQjLHnvQ";                 // vidéo par défaut (Samantha)
+const CELEB_VIDEOS = {                            // nom du joueur (minuscule, sans accent) -> ID YouTube
+  "samantha": "Z13CQjLHnvQ", "sam": "Z13CQjLHnvQ",
+  // "romain": "XXXXXXXXXXX", "roms": "XXXXXXXXXXX",   // <- vidéo de Romain (à fournir)
+};
+function normName(s) { return String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9 ]/g, "").trim(); }
+function currentLeader() { const rk = ranking(); return (rk && rk[0]) ? rk[0].player : null; }
 function celebrateBurst() { confetti(); setTimeout(confetti, 800); setTimeout(confetti, 1600); }
 function showWinSplash() {
   const el = document.getElementById("winSplash"); if (!el) return;
-  const f = document.getElementById("ytFrame"); if (f) f.src = CELEB_VIDEO;   // (re)lance la vidéo à chaque ouverture
+  const leader = currentLeader();
+  const t = document.getElementById("splashTitle"); const sub = document.getElementById("splashSub");
+  if (t) t.innerHTML = leader ? `${esc(leader.name)} ${leader.avatar || "👑"} est en tête&nbsp;!` : "En tête du classement&nbsp;!";
+  if (sub) sub.innerHTML = "👑 1<sup>er·e</sup> du classement 🎉 — bravo&nbsp;!";
+  const id = (leader && CELEB_VIDEOS[normName(leader.name)]) || DEFAULT_YT;
+  const f = document.getElementById("ytFrame"); if (f) f.src = "https://www.youtube.com/embed/" + id + YT_PARAMS;   // (re)lance la vidéo
+  const fb = document.getElementById("ytFallback"); if (fb) fb.href = "https://youtu.be/" + id;
   el.hidden = false; celebrateBurst(); try { playWin(); } catch (e) {}
 }
 window.openCelebration = showWinSplash;
@@ -949,6 +962,35 @@ function closeWinSplash() { const el = document.getElementById("winSplash"); if 
 document.getElementById("playMusic") && document.getElementById("playMusic").addEventListener("click", () => { celebrateBurst(); try { playWin(); } catch (e) {} });
 document.getElementById("closeSplash") && document.getElementById("closeSplash").addEventListener("click", closeWinSplash);
 document.getElementById("winSplash") && document.getElementById("winSplash").addEventListener("click", e => { if (e.target.id === "winSplash") closeWinSplash(); });
+
+/* ---------- Installation de l'appli (PWA) ---------- */
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+}
+let deferredPrompt = null;
+function isIOS() { return /iphone|ipad|ipod/i.test(navigator.userAgent); }
+function isStandalone() { return window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true; }
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault(); deferredPrompt = e;
+  const b = document.getElementById("installBtn"); if (b) b.hidden = false;
+});
+window.addEventListener("appinstalled", () => {
+  deferredPrompt = null;
+  const b = document.getElementById("installBtn"); if (b) b.hidden = true;
+  toast("✅ Appli installée !");
+});
+window.installApp = async () => {
+  if (deferredPrompt) {
+    deferredPrompt.prompt();
+    const r = await deferredPrompt.userChoice; deferredPrompt = null;
+    const b = document.getElementById("installBtn"); if (b && r && r.outcome === "accepted") b.hidden = true;
+    return;
+  }
+  if (isIOS()) { const m = document.getElementById("iosInstall"); if (m) m.hidden = false; return; }
+  toast("Menu du navigateur → « Installer / Ajouter à l'écran d'accueil »");
+};
+// iPhone : pas d'événement d'install auto -> on montre le bouton (aide manuelle) si pas déjà installé
+if (isIOS() && !isStandalone()) { const b = document.getElementById("installBtn"); if (b) b.hidden = false; }
 
 /* ============================================================
    INIT
